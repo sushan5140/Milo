@@ -1,5 +1,7 @@
 import { goals } from 'mineflayer-pathfinder'
 import { countItems, survivalCheck, toolClassFor, hasToolClass } from '../world/inventory.js'
+import { ensureTool } from './crafting.js'
+import { ensureFed } from '../safety/survival.js'
 
 const TOOL_RANK = ['netherite', 'diamond', 'iron', 'stone', 'golden', 'wooden']
 
@@ -72,11 +74,27 @@ export async function gatherResource({
   let noBlockAttempts = 0
   let mined = 0
   let hazardousBlocksSkipped = 0
+  let searchStep = 0
+  const searchOffsets = [
+    [16, 0], [0, 16], [-16, 0], [0, -16],
+    [24, 24], [-24, 24], [-24, -24], [24, -24]
+  ]
 
   while (countItems(bot, resource.drops) < amount) {
     if (shouldCancel()) throw new Error('TASK_CANCELLED')
     const safetyNow = survivalCheck(bot)
-    if (!safetyNow.safe) throw new Error(`SURVIVAL_CHECK_FAILED:${safetyNow.reason}`)
+    if (!safetyNow.safe) {
+      const recovery = await ensureFed(bot)
+      const after = survivalCheck(bot)
+      if (!after.safe) throw new Error(`SURVIVAL_CHECK_FAILED:${after.reason || 'could not recover'}`)
+      if (recovery.eaten > 0) onProgress(`I stopped to eat ${recovery.eaten} time${recovery.eaten === 1 ? '' : 's'} before continuing.`)
+    }
+
+    if (!['dirt'].includes(resource.canonical)) {
+      const toolClass = toolClassFor(resource)
+      const tool = await ensureTool({ bot, mcData, toolClass, resource })
+      if (tool.crafted) onProgress(`my ${toolClass} was gone or invalid, so I replaced it with a ${tool.tool.replaceAll('_', ' ')}.`)
+    }
 
     const block = bot.findBlock({
       matching,
@@ -87,9 +105,11 @@ export async function gatherResource({
     if (!block) {
       noBlockAttempts += 1
       if (noBlockAttempts >= 2) break
-      onProgress(`I can't see any ${resource.canonical.replaceAll('_', ' ')} nearby. checking from a different spot.`)
+      const [dx, dz] = searchOffsets[searchStep % searchOffsets.length]
+      searchStep += 1
+      onProgress(`I can't see any ${resource.canonical.replaceAll('_', ' ')} nearby. checking another direction.`)
       const p = bot.entity.position
-      await bot.pathfinder.goto(new goals.GoalNear(p.x + 12, p.y, p.z + 12, 2))
+      await bot.pathfinder.goto(new goals.GoalNear(p.x + dx, p.y, p.z + dz, 2))
       continue
     }
 
@@ -98,8 +118,10 @@ export async function gatherResource({
       hazardousBlocksSkipped += 1
       onProgress(`there's ${hazard.replaceAll('_', ' ')} right beside this block, so I'm leaving it.`)
       if (hazardousBlocksSkipped >= 3) break
+      const [dx, dz] = searchOffsets[searchStep % searchOffsets.length]
+      searchStep += 1
       const p = bot.entity.position
-      await bot.pathfinder.goto(new goals.GoalNear(p.x + 6, p.y, p.z + 6, 2))
+      await bot.pathfinder.goto(new goals.GoalNear(p.x + Math.sign(dx) * 8, p.y, p.z + Math.sign(dz) * 8, 2))
       continue
     }
 

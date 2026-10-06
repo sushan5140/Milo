@@ -4,6 +4,7 @@ import path from 'node:path'
 export class MemoryStore {
   constructor(filePath) {
     this.filePath = filePath
+    this._saveChain = Promise.resolve()
     this.data = {
       owner: {},
       places: {},
@@ -51,7 +52,15 @@ export class MemoryStore {
   }
 
   async save() {
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true })
-    await fs.writeFile(this.filePath, JSON.stringify(this.data, null, 2))
+    const snapshot = JSON.stringify(this.data, null, 2)
+    const tempPath = `${this.filePath}.tmp`
+
+    this._saveChain = this._saveChain.then(async () => {
+      await fs.mkdir(path.dirname(this.filePath), { recursive: true })
+      await fs.writeFile(tempPath, snapshot)
+      await fs.rename(tempPath, this.filePath)
+    })
+
+    return this._saveChain
   }
 }

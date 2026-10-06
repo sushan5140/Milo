@@ -94,6 +94,14 @@ export function summarizeProject(project) {
 }
 
 export function findProject(projects, name) {
-  const wanted = normalizeName(name)
-  return Object.values(projects || {}).find(project => project.id === wanted || normalizeName(project.name) === wanted) || null
+  const wantedId = normalizeName(name)
+  const wantedLabel = normalizedLabel(name)
+  return Object.values(projects || {}).find(project =>
+    project.id === wantedId || normalizedLabel(project.name) === wantedLabel
+  ) || null
+}
+
+export function listProjects(projects) {
+  return Object.values(projects || {})
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
 }

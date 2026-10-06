@@ -1,10 +1,24 @@
 import { goals } from 'mineflayer-pathfinder'
 import { countItems, survivalCheck, toolClassFor, hasToolClass } from '../world/inventory.js'
 
+const TOOL_RANK = ['netherite', 'diamond', 'iron', 'stone', 'golden', 'wooden']
+
 function resolveBlockIds(mcData, names) {
   return names
     .map(name => mcData.blocksByName[name]?.id)
     .filter(Number.isInteger)
+}
+
+async function equipBestTool(bot, toolClass) {
+  const items = bot.inventory.items()
+  for (const material of TOOL_RANK) {
+    const tool = items.find(item => item.name === `${material}_${toolClass}`)
+    if (tool) {
+      await bot.equip(tool, 'hand')
+      return tool
+    }
+  }
+  return null
 }
 
 export async function gatherResource({ bot, mcData, resource, amount, onProgress = () => {} }) {
@@ -12,7 +26,7 @@ export async function gatherResource({ bot, mcData, resource, amount, onProgress
   const needed = Math.max(0, amount - initial)
 
   if (needed === 0) {
-    return { gathered: 0, total: initial, alreadyHadEnough: true }
+    return { gathered: 0, total: initial, alreadyHadEnough: true, complete: true }
   }
 
   const safety = survivalCheck(bot)
@@ -23,6 +37,10 @@ export async function gatherResource({ bot, mcData, resource, amount, onProgress
   const toolClass = toolClassFor(resource)
   if (!hasToolClass(bot, toolClass) && !['dirt'].includes(resource.canonical)) {
     throw new Error(`MISSING_TOOL:${toolClass}`)
+  }
+
+  if (!['dirt'].includes(resource.canonical)) {
+    await equipBestTool(bot, toolClass)
   }
 
   const matching = resolveBlockIds(mcData, resource.blocks)
@@ -46,7 +64,7 @@ export async function gatherResource({ bot, mcData, resource, amount, onProgress
     if (!block) {
       noBlockAttempts += 1
       if (noBlockAttempts >= 2) break
-      onProgress(`I can't see any ${resource.canonical} nearby. checking from a different spot.`)
+      onProgress(`I can't see any ${resource.canonical.replaceAll('_', ' ')} nearby. checking from a different spot.`)
       const p = bot.entity.position
       await bot.pathfinder.goto(new goals.GoalNear(p.x + 12, p.y, p.z + 12, 2))
       continue

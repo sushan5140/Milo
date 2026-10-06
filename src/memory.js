@@ -55,7 +55,7 @@ export class MemoryStore {
     const snapshot = JSON.stringify(this.data, null, 2)
     const tempPath = `${this.filePath}.tmp`
 
-    this._saveChain = this._saveChain.then(async () => {
+    this._saveChain = this._saveChain.catch(() => {}).then(async () => {
       await fs.mkdir(path.dirname(this.filePath), { recursive: true })
       await fs.writeFile(tempPath, snapshot)
       await fs.rename(tempPath, this.filePath)

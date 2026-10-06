@@ -50,17 +50,17 @@
 - [~] Collaborative task suggestions — next-material bottleneck selection implemented
 
 ## M5 — Image-to-Build
-- [~] reference-image interpretation — project reference/design memory exists; actual image analysis pending
-- [~] block-palette proposal — plan schema supports weighted palettes; image-derived palette pending
-- [x] footprint/height planning model with revision + approval
-- [x] deterministic planning-stage material estimate
+- [~] reference-image interpretation — observation-to-plan adapter implemented; actual image ingestion/model analysis pending
+- [x] editable weighted block-palette planning; image-derived palette still pending
+- [x] footprint/height planning model, revision/approval, and non-destructive perimeter-walk preview
+- [x] deterministic planning-stage material estimate + section inference for foundation/walls/roof
 - [ ] build executor — intentionally locked pending live-world verification
 - [ ] visual/world-state verification — pending
 
 
 ## Next implementation batch
-1. Add build palette editing and palette-to-resource translation.
-2. Add reference-image analysis adapter that converts image observations into the existing build-plan schema.
-3. Add footprint/outline preview in-world without placing permanent structure blocks.
-4. Add section/layer generation for walls, roof, openings and decorative regions.
-5. Keep automatic construction locked until live-world M0-M3 integration testing passes.
+1. Add an actual image-ingestion boundary (file/URL metadata + pluggable vision analyzer) that emits reference observations.
+2. Add palette-to-resource translation so build plans can populate project material bills automatically.
+3. Add richer geometry/layer generation for doors, windows, roof slopes and decorative regions.
+4. Add a plan-vs-world verifier that can compare intended blocks to observed blocks without modifying the world.
+5. Keep automatic permanent construction locked until live-world M0-M3 integration testing passes.

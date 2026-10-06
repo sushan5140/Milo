@@ -1,5 +1,7 @@
 import { goals } from 'mineflayer-pathfinder'
-import { Vec3 } from 'vec3'
+import vec3 from 'vec3'
+
+const { Vec3 } = vec3
 
 export function nearestChest(bot, maxDistance = 6) {
   return bot.findBlock({

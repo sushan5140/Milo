@@ -10,16 +10,19 @@
 - [ ] Smoke test against a real Java server
 
 ## M1 — Resource Runner
-- [ ] Parse "get me N <resource>"
-- [ ] Inventory introspection
-- [ ] Tool requirement resolver
-- [ ] Basic food/survival check
-- [ ] Block/resource locator
-- [ ] Mining skill
-- [ ] Return-to-home recovery
-- [ ] Remember storage chest
-- [ ] Deposit exact requested amount
-- [ ] Event log and completion report
+- [x] Parse "get me N <resource>"
+- [x] Inventory introspection
+- [x] Tool requirement resolver
+- [x] Basic food/survival check
+- [x] Block/resource locator
+- [x] Mining skill
+- [x] Return-to-home flow
+- [x] Remember storage chest/barrel
+- [x] Deposit exact requested amount
+- [x] Event log and completion report
+- [ ] Real-server integration test and fixes
+
+> M1 code is implemented but not considered reliable until tested against a live Java world. Smelting is intentionally deferred to M2.
 
 ## M2 — Craft + Smelt
 - [ ] Craft missing tools

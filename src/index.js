@@ -56,6 +56,41 @@ function posLabel(position) {
   return `${Math.floor(position.x)}, ${Math.floor(position.y)}, ${Math.floor(position.z)}`
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function pauseActiveTask(reason = 'priority_interrupt') {
+  if (!activeTask) return null
+
+  const snapshot = {
+    id: activeTask.id,
+    intent: activeTask.intent,
+    reason,
+    savedAt: new Date().toISOString()
+  }
+
+  activeTask.cancelled = true
+  memory.set('tasks.pending', snapshot)
+  memory.set('tasks.current', null)
+  memory.pushEvent('task_preempted', {
+    id: activeTask.id,
+    resource: activeTask.resource,
+    amount: activeTask.amount,
+    reason
+  })
+  await memory.save()
+
+  bot.pathfinder.stop()
+  bot.clearControlStates()
+
+  for (let i = 0; i < 15 && activeTask; i += 1) {
+    await sleep(100)
+  }
+
+  return snapshot
+}
+
 async function goHome() {
   const home = memory.get('places.home')
   if (!home) throw new Error('HOME_UNKNOWN')
@@ -91,6 +126,8 @@ function friendlyError(error) {
   if (message === 'NO_DEATH_MEMORY') return "I don't have a recent death location to recover from."
   if (message === 'DEATH_MEMORY_STALE') return "that death was too long ago for me to treat the dropped items as recoverable."
   if (message === 'DEATH_OTHER_DIMENSION') return "my last death was in another dimension; cross-dimension recovery isn't safe yet."
+  if (message === 'NO_FOOD_LOW_HEALTH') return "my health is too low and I don't have food to recover safely."
+  if (message === 'NO_FOOD_LOW_HUNGER') return "I'm too hungry to continue and I don't have food."
   if (message.startsWith('CANNOT_DIG:')) return `I reached it, but I can't safely dig ${message.split(':')[1]}.`
   return "that task broke somewhere, so I stopped instead of guessing."
 }
@@ -365,21 +402,22 @@ bot.on('chat', async (username, message) => {
       return
     }
 
-    if (/^(come|come here|follow me)$/.test(normalized)) {
-      if (activeTask) {
-        say("I'm in the middle of a task. cancellation/interruption comes in the recovery phase.")
-        return
-      }
-
+    if (/^(come|come here|follow me|help me|come help me|come here now)$/.test(normalized)) {
       const target = bot.players[username]?.entity
       if (!target) {
         say("I can't see you right now.")
         return
       }
 
-      say('coming.')
+      if (activeTask) {
+        const paused = await pauseActiveTask('player_priority')
+        if (paused) say("pausing that job — coming to you now.")
+      } else {
+        say('coming.')
+      }
+
       await bot.pathfinder.goto(new goals.GoalNear(target.position.x, target.position.y, target.position.z, 2))
-      say('here.')
+      say("I'm here. the previous task is saved if you want me to resume it.")
       return
     }
 

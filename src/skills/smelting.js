@@ -101,9 +101,6 @@ export async function smeltResource({ bot, mcData, inputNames, outputName, amoun
     if (!input) break
 
     const batch = Math.min(remaining, input.count, 64)
-    const fuelPlan = findFuel(bot, batch)
-    if (!fuelPlan) throw new Error('FUEL_MISSING')
-
     const furnace = await bot.openFurnace(furnaceBlock)
 
     try {
@@ -116,6 +113,8 @@ export async function smeltResource({ bot, mcData, inputNames, outputName, amoun
       await furnace.putInput(input.type, input.metadata ?? null, batch)
 
       if (!furnace.fuelItem() || furnace.fuel <= 0.05) {
+        const fuelPlan = findFuel(bot, batch)
+        if (!fuelPlan) throw new Error('FUEL_MISSING')
         await furnace.putFuel(
           fuelPlan.item.type,
           fuelPlan.item.metadata ?? null,

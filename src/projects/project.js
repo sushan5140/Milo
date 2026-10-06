@@ -77,3 +77,18 @@ export function suggestProjectNext(project) {
   if(project.stage==='verification') return 'Inspect the planned structure against the actual blocks.'
   return 'Review the build plan; automatic construction is not enabled yet.'
 }
+
+
+export function setProjectReference(project, reference) {
+  project.design ??= { style: null, constraints: [], reference: null, plan: null }
+  project.design.reference = reference
+  project.updatedAt = now()
+  return project
+}
+
+export function setProjectBuildPlan(project, plan) {
+  project.design ??= { style: null, constraints: [], reference: null, plan: null }
+  project.design.plan = plan
+  project.updatedAt = now()
+  return project
+}

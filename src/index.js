@@ -25,6 +25,9 @@ import { stagePlanRevision, acceptPlanRevision, rejectPlanRevision } from './bui
 import { addProtectedZone, approveBuildSection, revokeBuildSectionApproval, createRollbackSnapshot, recordRollbackSnapshot, canExecuteSection } from './building/execution-safety.js'
 import { flattenExpectedBlocks } from './building/geometry.js'
 import { dryRunSection, summarizeDryRun, buildExecutionManifest } from './building/dry-run.js'
+import { analyzeBuildSite, summarizeSitePreflight } from './building/site-preflight.js'
+import { inventoryReadiness, summarizeInventoryReadiness } from './building/readiness.js'
+import { diffRollbackSnapshot, summarizeRollbackPreview } from './building/rollback-preview.js'
 
 const {
   MILO_HOST = 'localhost',
@@ -677,7 +680,84 @@ bot.on('chat', async (username, message) => {
       return
     }
 
-    const dryRunMatch = normalized.match(/^dry run build(?:\s+(\S+))?$/)
+    if (/^(site preflight|check build site|preflight build site)$/.test(normalized)) {
+      if (!activeProject?.design?.plan || !activeProject?.site) {
+        say("I need both a build plan and a project site first.")
+        return
+      }
+      if (activeProject.site.dimension !== bot.game.dimension) {
+        say("the project site is in another dimension.")
+        return
+      }
+
+      const result = analyzeBuildSite(bot, activeProject)
+      activeProject.buildSafety ??= {}
+      activeProject.buildSafety.lastSitePreflight = {
+        ...result,
+        checkedAt: new Date().toISOString()
+      }
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      memory.pushEvent('build_site_preflight', {
+        projectId: activeProject.id,
+        safe: result.safe,
+        liquids: result.liquids,
+        blockedClearance: result.blockedClearance,
+        nearbyEntities: result.nearbyEntities
+      })
+      await memory.save()
+      say(`${summarizeSitePreflight(result)} | 0 blocks changed`)
+      return
+    }
+
+    const readinessMatch = normalized.match(/^section readiness(?:\s+(\S+))?$/)
+    if (readinessMatch) {
+      if (!activeProject?.buildSafety?.lastManifest) {
+        say("run a dry build first so I know the exact placement list.")
+        return
+      }
+      const section = readinessMatch[1] || activeProject.buildSafety.lastManifest.sectionId || 'all'
+      const result = inventoryReadiness(bot, activeProject, section)
+      say(summarizeInventoryReadiness(result))
+      return
+    }
+
+    const rollbackPreviewMatch = normalized.match(/^rollback preview(?:\s+(\S+))?$/)
+    if (rollbackPreviewMatch) {
+      if (!activeProject?.buildSafety?.rollbackLog?.length) {
+        say("there's no rollback snapshot yet.")
+        return
+      }
+      if (!activeProject?.buildSafety?.lastManifest) {
+        say("there's no dry-run manifest to compare against.")
+        return
+      }
+
+      const requestedSection = rollbackPreviewMatch[1] || activeProject.buildSafety.lastManifest.sectionId
+      const snapshot = [...activeProject.buildSafety.rollbackLog].reverse()
+        .find(s => s.sectionId === requestedSection)
+
+      if (!snapshot) {
+        say(`there's no rollback snapshot for section ${requestedSection}.`)
+        return
+      }
+
+      const result = diffRollbackSnapshot(snapshot, activeProject.buildSafety.lastManifest)
+      activeProject.buildSafety.lastRollbackPreview = {
+        snapshotId: result.snapshotId,
+        sectionId: result.sectionId,
+        compared: result.compared,
+        wouldChange: result.wouldChange,
+        blocked: result.blocked,
+        alreadyCorrect: result.alreadyCorrect,
+        checkedAt: new Date().toISOString()
+      }
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      await memory.save()
+      say(`${summarizeRollbackPreview(result)} This is preview-only.`)
+      return
+    }
+
+        const dryRunMatch = normalized.match(/^dry run build(?:\s+(\S+))?$/)
     if (dryRunMatch) {
       if (!activeProject?.design?.plan || !activeProject?.site) {
         say("I need both a build plan and a project site first.")

@@ -1,6 +1,7 @@
 import { goals } from 'mineflayer-pathfinder'
 import vec3 from 'vec3'
 import { countItems } from '../world/inventory.js'
+import { ensureFurnaceItem } from './crafting.js'
 
 const { Vec3 } = vec3
 const FUEL_VALUES = {
@@ -54,9 +55,9 @@ function placementCandidate(bot, maxDistance = 6) {
   })
 }
 
-async function placeInventoryFurnace(bot) {
-  const furnaceItem = findInventoryItem(bot, ['furnace'])
-  if (!furnaceItem) return null
+async function placeInventoryFurnace(bot, mcData) {
+  let furnaceItem = findInventoryItem(bot, ['furnace'])
+  if (!furnaceItem) furnaceItem = await ensureFurnaceItem(bot, mcData)
 
   const support = placementCandidate(bot)
   if (!support) throw new Error('NO_SAFE_FURNACE_SPOT')
@@ -80,7 +81,7 @@ async function waitForOutput(furnace, expectedName, minimumCount, timeoutMs) {
 
 export async function smeltResource({ bot, mcData, inputNames, outputName, amount }) {
   let furnaceBlock = nearestFurnace(bot, mcData)
-  if (!furnaceBlock) furnaceBlock = await placeInventoryFurnace(bot)
+  if (!furnaceBlock) furnaceBlock = await placeInventoryFurnace(bot, mcData)
   if (!furnaceBlock) throw new Error('FURNACE_MISSING')
 
   await bot.pathfinder.goto(new goals.GoalNear(

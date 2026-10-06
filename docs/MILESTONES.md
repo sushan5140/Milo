@@ -59,11 +59,11 @@
 
 
 ## Next implementation batch
-1. Add richer exact block-state generation for doors, slabs and stair variants across all generated sections.
-2. Add terrain/site preflight: uneven ground, liquids, clearance, nearby entities and support planning.
-3. Add rollback preview/diff reports that compare snapshot metadata against a proposed execution manifest.
-4. Add inventory/crafting readiness checks for each dry-run section.
-5. Run the live-world M0-M3 smoke test before any permanent placement can be enabled.
+1. Run the live-world M0-M3 smoke test against a real Minecraft Java server.
+2. Patch Mineflayer integration mismatches found in movement, digging, container, furnace, consume and entity APIs.
+3. Re-run dry-run/site-preflight flows against the same live world.
+4. Only after those pass, design the first permanently-disabled-by-default placement executor behind an explicit feature flag.
+5. Keep rollback snapshots, protected zones and per-section approvals mandatory for any future placement.
 
 
 ## M6 — Execution Safety Design
@@ -78,3 +78,7 @@
 - [x] Read-only dry-run executor with conflict classification
 - [x] Section execution manifests with zero world mutation
 - [ ] Live-world validation before any executor enablement
+- [x] Terrain/site preflight
+- [x] Door/slab/stair state helpers
+- [x] Per-section inventory readiness
+- [x] Rollback snapshot vs manifest preview

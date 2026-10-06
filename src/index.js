@@ -128,6 +128,8 @@ function friendlyError(error) {
   if (message === 'DEATH_OTHER_DIMENSION') return "my last death was in another dimension; cross-dimension recovery isn't safe yet."
   if (message === 'NO_FOOD_LOW_HEALTH') return "my health is too low and I don't have food to recover safely."
   if (message === 'NO_FOOD_LOW_HUNGER') return "I'm too hungry to continue and I don't have food."
+  if (message === 'DROWNING_RISK') return "my oxygen is too low; I'm abandoning the task until I'm safe."
+  if (message === 'FIRE_RISK') return "I'm on fire or in lava; I'm abandoning the task until I'm safe."
   if (message.startsWith('CANNOT_DIG:')) return `I reached it, but I can't safely dig ${message.split(':')[1]}.`
   return "that task broke somewhere, so I stopped instead of guessing."
 }
@@ -343,6 +345,43 @@ bot.on('chat', async (username, message) => {
   const normalized = rawIntent.toLowerCase()
 
   try {
+    const replacementMatch = normalized.match(/^(?:forget|drop|cancel|stop).+?\b((?:get|grab|bring|fetch|mine|collect)(?: me)?\s+.+?)(?:\s+instead)?$/)
+
+    if (replacementMatch) {
+      const replacementText = replacementMatch[1].replace(/\s+instead$/, '')
+      const nextIntent = parseIntent(replacementText)
+
+      if (nextIntent.type !== 'gather') {
+        say("I understood that you want to replace the task, but I couldn't understand the new resource request.")
+        return
+      }
+
+      if (activeTask) {
+        activeTask.cancelled = true
+        bot.pathfinder.stop()
+        bot.clearControlStates()
+
+        for (let i = 0; i < 20 && activeTask; i += 1) {
+          await sleep(100)
+        }
+      }
+
+      memory.set('tasks.pending', null)
+      memory.set('tasks.current', null)
+      memory.pushEvent('task_replaced', {
+        with: {
+          amount: nextIntent.amount,
+          resource: nextIntent.resource.canonical
+        },
+        at: new Date().toISOString()
+      })
+      await memory.save()
+
+      say(`okay, dropping the old job. switching to ${nextIntent.amount} ${nextIntent.resource.display || nextIntent.resource.canonical}.`)
+      void runGatherTask(username, nextIntent)
+      return
+    }
+
     if (/^(resume|resume task|continue task|continue)$/.test(normalized)) {
       if (activeTask) {
         say("I'm already working on something.")

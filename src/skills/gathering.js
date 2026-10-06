@@ -54,7 +54,10 @@ export async function gatherResource({
 
   const safety = survivalCheck(bot)
   if (!safety.safe) {
-    throw new Error(`SURVIVAL_CHECK_FAILED:${safety.reason}`)
+    const recovery = await ensureFed(bot)
+    const after = survivalCheck(bot)
+    if (!after.safe) throw new Error(`SURVIVAL_CHECK_FAILED:${after.reason || 'could not recover'}`)
+    if (recovery.eaten > 0) onProgress(`I ate before heading out so I don't start the task in bad shape.`)
   }
 
   const toolClass = toolClassFor(resource)

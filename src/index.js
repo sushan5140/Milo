@@ -4,10 +4,11 @@ import minecraftData from 'minecraft-data'
 import { pathfinder, Movements, goals } from 'mineflayer-pathfinder'
 import { MemoryStore } from './memory.js'
 import { parseIntent, supportedResources } from './agent/intent.js'
-import { inventorySummary } from './world/inventory.js'
+import { inventorySummary, toolClassFor } from './world/inventory.js'
 import { gatherResource } from './skills/gathering.js'
 import { nearestChest, serializePosition, depositItems } from './skills/storage.js'
 import { smeltResource } from './skills/smelting.js'
+import { ensureTool } from './skills/crafting.js'
 
 const {
   MILO_HOST = 'localhost',
@@ -65,6 +66,14 @@ function friendlyError(error) {
   if (message.startsWith('MISSING_TOOL:')) {
     return `I need a ${message.split(':')[1]} before I can do that.`
   }
+  if (message === 'CRAFTING_TABLE_MISSING') return "I need a crafting table nearby before I can make the missing gear."
+  if (message.startsWith('TOOL_MATERIALS_MISSING:')) {
+    const [, tool, tier] = message.split(':')
+    return `I need materials for at least a ${tier} ${tool} before I can do that.`
+  }
+  if (message.startsWith('TOOL_CRAFT_FAILED:')) return `I couldn't craft ${message.split(':')[1]} safely.`
+  if (message === 'FURNACE_MATERIALS_MISSING') return "I need 8 cobblestone and a crafting table before I can make a furnace."
+  if (message === 'NO_SAFE_FURNACE_SPOT') return "I couldn't find a safe empty spot to place a furnace without touching your build."
   if (message.startsWith('SURVIVAL_CHECK_FAILED:')) {
     return `I'm not risking it yet — ${message.split(':').slice(1).join(':')}.`
   }
@@ -90,6 +99,12 @@ async function runGatherTask(username, intent) {
   say(`got it. going for ${amount} ${resource.canonical.replaceAll('_', ' ')}.`)
 
   try {
+    const toolClass = toolClassFor(resource)
+    if (!['dirt'].includes(resource.canonical)) {
+      const tool = await ensureTool({ bot, mcData, toolClass, resource })
+      if (tool.crafted) say(`I was missing a usable ${toolClass}, so I made a ${tool.tool.replaceAll('_', ' ')} first.`)
+    }
+
     const result = await gatherResource({
       bot,
       mcData,

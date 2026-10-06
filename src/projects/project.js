@@ -1,10 +1,11 @@
+import { createBuildSafetyState } from '../building/execution-safety.js'
 const now = () => new Date().toISOString()
 const label = name => String(name).trim().toLowerCase().replace(/\s+/g, ' ')
 const slug = name => label(name).replace(/[^a-z0-9 _-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'project'
 export const STAGES = ['planning', 'materials', 'building', 'verification']
 export function createProject({name,description=''}) {
   return {id:slug(name),name:String(name).trim(),description,status:'active',stage:'planning',
-    materials:{},notes:[],site:null,design:{style:null,constraints:[],reference:null,plan:null},
+    materials:{},notes:[],site:null,design:{style:null,constraints:[],reference:null,plan:null},buildSafety:createBuildSafetyState(),
     createdAt:now(),updatedAt:now()}
 }
 export function addMaterial(project,resource,amount) {
@@ -91,4 +92,10 @@ export function setProjectBuildPlan(project, plan) {
   project.design.plan = plan
   project.updatedAt = now()
   return project
+}
+
+
+export function ensureBuildSafety(project) {
+  project.buildSafety ??= createBuildSafetyState()
+  return project.buildSafety
 }

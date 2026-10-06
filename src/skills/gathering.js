@@ -21,7 +21,28 @@ async function equipBestTool(bot, toolClass) {
   return null
 }
 
-export async function gatherResource({ bot, mcData, resource, amount, onProgress = () => {} }) {
+function hazardNear(bot, position) {
+  const hazards = new Set(['lava', 'fire', 'soul_fire'])
+  const offsets = [
+    [1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1],
+    [1,-1,0],[-1,-1,0],[0,-1,1],[0,-1,-1]
+  ]
+
+  for (const [x,y,z] of offsets) {
+    const block = bot.blockAt(position.offset(x,y,z))
+    if (block && hazards.has(block.name)) return block.name
+  }
+  return null
+}
+
+export async function gatherResource({
+  bot,
+  mcData,
+  resource,
+  amount,
+  onProgress = () => {},
+  shouldCancel = () => false
+}) {
   const initial = countItems(bot, resource.drops)
   const needed = Math.max(0, amount - initial)
 
@@ -50,8 +71,10 @@ export async function gatherResource({ bot, mcData, resource, amount, onProgress
 
   let noBlockAttempts = 0
   let mined = 0
+  let hazardousBlocksSkipped = 0
 
   while (countItems(bot, resource.drops) < amount) {
+    if (shouldCancel()) throw new Error('TASK_CANCELLED')
     const safetyNow = survivalCheck(bot)
     if (!safetyNow.safe) throw new Error(`SURVIVAL_CHECK_FAILED:${safetyNow.reason}`)
 
@@ -70,8 +93,19 @@ export async function gatherResource({ bot, mcData, resource, amount, onProgress
       continue
     }
 
+    const hazard = hazardNear(bot, block.position)
+    if (hazard) {
+      hazardousBlocksSkipped += 1
+      onProgress(`there's ${hazard.replaceAll('_', ' ')} right beside this block, so I'm leaving it.`)
+      if (hazardousBlocksSkipped >= 3) break
+      const p = bot.entity.position
+      await bot.pathfinder.goto(new goals.GoalNear(p.x + 6, p.y, p.z + 6, 2))
+      continue
+    }
+
     noBlockAttempts = 0
     await bot.pathfinder.goto(new goals.GoalNear(block.position.x, block.position.y, block.position.z, 1))
+    if (shouldCancel()) throw new Error('TASK_CANCELLED')
 
     const freshBlock = bot.blockAt(block.position)
     if (!freshBlock || freshBlock.name === 'air') continue
@@ -86,6 +120,7 @@ export async function gatherResource({ bot, mcData, resource, amount, onProgress
     gathered: Math.max(0, total - initial),
     total,
     mined,
+    hazardousBlocksSkipped,
     complete: total >= amount
   }
 }

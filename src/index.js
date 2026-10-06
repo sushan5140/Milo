@@ -7,6 +7,7 @@ import { parseIntent, supportedResources } from './agent/intent.js'
 import { inventorySummary } from './world/inventory.js'
 import { gatherResource } from './skills/gathering.js'
 import { nearestChest, serializePosition, depositItems } from './skills/storage.js'
+import { smeltResource } from './skills/smelting.js'
 
 const {
   MILO_HOST = 'localhost',
@@ -70,6 +71,10 @@ function friendlyError(error) {
   if (message === 'HOME_UNKNOWN') return "I can gather it, but show me home first with 'Milo remember home'."
   if (message === 'HOME_OTHER_DIMENSION') return "home is in another dimension. cross-dimension return isn't wired yet."
   if (message === 'STORAGE_MISSING') return "the storage I remembered isn't there anymore."
+  if (message === 'FURNACE_MISSING') return "I brought the ore back, but I can't find a furnace close enough yet."
+  if (message === 'FUEL_MISSING') return "I found a furnace, but I don't have coal or charcoal to smelt this yet."
+  if (message === 'FURNACE_BUSY') return "the nearby furnace is busy with something else, so I left it alone."
+  if (message === 'SMELT_TIMEOUT') return "the furnace didn't finish normally, so I stopped instead of assuming it worked."
   if (message.startsWith('CANNOT_DIG:')) return `I reached it, but I can't safely dig ${message.split(':')[1]}.`
   return "that task broke somewhere, so I stopped instead of guessing."
 }
@@ -103,15 +108,33 @@ async function runGatherTask(username, intent) {
       await goHome()
     }
 
+    let deliveryNames = resource.drops
+    let deliveryCount = result.total
+    let processed = 0
+
+    if (resource.process === 'smelt' && result.total > 0) {
+      say(`got the ore. smelting ${Math.min(amount, result.total)} now.`)
+      const smelt = await smeltResource({
+        bot,
+        mcData,
+        inputNames: resource.drops,
+        outputName: resource.finished[0],
+        amount: Math.min(amount, result.total)
+      })
+      processed = smelt.produced
+      deliveryNames = resource.finished
+      deliveryCount = smelt.produced
+    }
+
     const storage = memory.get('storage.default')
     let deposited = 0
 
     if (storage && storage.dimension === bot.game.dimension) {
-      const targetCount = Math.min(amount, result.total)
+      const targetCount = Math.min(amount, deliveryCount)
       const deposit = await depositItems({
         bot,
         storage,
-        itemNames: resource.drops,
+        itemNames: deliveryNames,
         count: targetCount
       })
       deposited = deposit.deposited
@@ -122,9 +145,10 @@ async function runGatherTask(username, intent) {
       requested: amount,
       resource: resource.canonical,
       gathered: result.gathered,
-      totalHeld: result.total,
+      processed,
+      totalHeld: deliveryCount,
       deposited,
-      complete: result.complete,
+      complete: resource.process === 'smelt' ? processed >= amount : result.complete,
       finishedAt: new Date().toISOString()
     }
 
@@ -132,11 +156,11 @@ async function runGatherTask(username, intent) {
     await memory.save()
 
     if (deposited > 0) {
-      say(`back. I put ${deposited} ${resource.canonical.replaceAll('_', ' ')} in storage.`)
+      say(`back. I put ${deposited} ${resource.display || resource.canonical.replaceAll('_', ' ')} in storage.`)
     } else if (home) {
-      say(`back home. I've got ${result.total} on me — show me a chest with 'Milo remember storage' and I'll use it next time.`)
+      say(`back home. I've got ${deliveryCount} ${resource.display || resource.canonical.replaceAll('_', ' ')} on me — show me a chest with 'Milo remember storage' and I'll use it next time.`)
     } else {
-      say(`done for now. I've got ${result.total} on me. you haven't shown me home yet.`)
+      say(`done for now. I've got ${deliveryCount} on me. you haven't shown me home yet.`)
     }
   } catch (error) {
     memory.pushEvent('task_failed', {

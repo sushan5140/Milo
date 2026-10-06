@@ -26,10 +26,11 @@
 
 ## M2 — Craft + Smelt
 - [ ] Craft missing tools
-- [ ] Furnace discovery/placement
-- [ ] Fuel selection
-- [ ] Smelting jobs
-- [ ] Distinguish raw ore vs ingot intent
+- [~] Furnace discovery/placement — discovery implemented, placement still pending
+- [x] Fuel selection for coal/charcoal
+- [x] Smelting job pipeline using an existing furnace
+- [x] Distinguish raw ore vs ingot intent
+- [ ] Live-world furnace integration test
 
 ## M3 — Reliable Teammate
 - [ ] Goal verification

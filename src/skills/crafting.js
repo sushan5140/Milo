@@ -1,6 +1,13 @@
 import { goals } from 'mineflayer-pathfinder'
 
-const TOOL_ORDER = ['wooden', 'golden', 'stone', 'iron', 'diamond', 'netherite']
+const TOOL_TIER = {
+  wooden: 0,
+  golden: 0,
+  stone: 1,
+  iron: 2,
+  diamond: 3,
+  netherite: 4
+}
 const MINING_TIER = {
   coal: 'wooden',
   cobblestone: 'wooden',
@@ -21,7 +28,7 @@ function item(bot, name) {
 }
 
 function toolRank(material) {
-  return TOOL_ORDER.indexOf(material)
+  return TOOL_TIER[material] ?? -1
 }
 
 function requiredTier(resource) {
@@ -43,7 +50,7 @@ function craftingTableBlock(bot, mcData, maxDistance = 16) {
   return bot.findBlock({ matching: id, maxDistance })
 }
 
-async function craftByName(bot, mcData, name, count = 1, table = null) {
+export async function craftByName(bot, mcData, name, count = 1, table = null) {
   const target = mcData.itemsByName[name]
   if (!target) return false
 
@@ -127,4 +134,25 @@ export async function ensureTool({ bot, mcData, toolClass, resource }) {
   await bot.equip(made, 'hand')
 
   return { crafted: true, tool: toolName }
+}
+
+
+export async function ensureCraftingTableNearby(bot, mcData, maxDistance = 16) {
+  const table = craftingTableBlock(bot, mcData, maxDistance)
+  if (!table) throw new Error('CRAFTING_TABLE_MISSING')
+  await bot.pathfinder.goto(new goals.GoalNear(table.position.x, table.position.y, table.position.z, 2))
+  return table
+}
+
+export async function ensureFurnaceItem(bot, mcData) {
+  const existing = item(bot, 'furnace')
+  if (existing) return existing
+
+  const table = await ensureCraftingTableNearby(bot, mcData)
+  const crafted = await craftByName(bot, mcData, 'furnace', 1, table)
+  if (!crafted) throw new Error('FURNACE_MATERIALS_MISSING')
+
+  const made = item(bot, 'furnace')
+  if (!made) throw new Error('FURNACE_CRAFT_FAILED')
+  return made
 }

@@ -34,12 +34,12 @@
 - [ ] Live-world crafting/furnace integration test
 
 ## M3 — Reliable Teammate
-- [ ] Goal verification
-- [ ] General replanning
-- [x] Death-location memory + explicit item recovery
+- [x] Goal verification with storage/inventory state deltas
+- [~] General replanning — bounded retries + one gather replan implemented
+- [x] Death-location memory + inventory-verified item recovery
 - [~] Hazard policies — health/hunger and adjacent lava/fire guards implemented
 - [x] Task cancellation
-- [~] Player interruption — stop/cancel implemented; task replacement/resume still pending
+- [x] Player interruption — stop/cancel + persistent resume implemented
 
 ## M4 — Shared Projects
 - [ ] Persistent named projects
@@ -58,8 +58,8 @@
 
 
 ## Next implementation batch
-1. Goal verifier: compare requested outcome with actual inventory/storage/world state.
-2. Retry/replan policy for path failures, missing blocks, broken tools and busy furnaces.
-3. Resume interrupted tasks rather than discarding them.
-4. Better death recovery verification (compare recovered inventory snapshot).
-5. First live-world smoke-test checklist and diagnostics.
+1. Expand replanning beyond bounded retries: alternate search directions, broken-tool replacement mid-task, and recovery from unreachable goals.
+2. Add automatic eating/healing behavior instead of only refusing unsafe tasks.
+3. Add task replacement/priority ("stop coal and help me now").
+4. Run the documented live-world smoke test and patch integration failures.
+5. Begin M4 project memory once M3 survives real gameplay.

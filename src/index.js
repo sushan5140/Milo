@@ -24,6 +24,7 @@ import { verifyPlanAgainstWorld, summarizeWorldVerification } from './building/w
 import { stagePlanRevision, acceptPlanRevision, rejectPlanRevision } from './building/plan-diff.js'
 import { addProtectedZone, approveBuildSection, revokeBuildSectionApproval, createRollbackSnapshot, recordRollbackSnapshot, canExecuteSection } from './building/execution-safety.js'
 import { flattenExpectedBlocks } from './building/geometry.js'
+import { dryRunSection, summarizeDryRun, buildExecutionManifest } from './building/dry-run.js'
 
 const {
   MILO_HOST = 'localhost',
@@ -676,7 +677,65 @@ bot.on('chat', async (username, message) => {
       return
     }
 
-    const executorStatusMatch = normalized.match(/^executor status(?:\s+(\S+))?$/)
+    const dryRunMatch = normalized.match(/^dry run build(?:\s+(\S+))?$/)
+    if (dryRunMatch) {
+      if (!activeProject?.design?.plan || !activeProject?.site) {
+        say("I need both a build plan and a project site first.")
+        return
+      }
+      if (activeProject.site.dimension !== bot.game.dimension) {
+        say("the project site is in another dimension.")
+        return
+      }
+
+      const section = dryRunMatch[1] || 'all'
+      const result = dryRunSection({
+        bot,
+        project: activeProject,
+        sectionId: section,
+        sampleLimit: 10000
+      })
+
+      const manifest = buildExecutionManifest(result)
+      activeProject.buildSafety ??= {}
+      activeProject.buildSafety.lastDryRun = {
+        sectionId: section,
+        summary: manifest.summary,
+        blocked: result.blocked,
+        generatedAt: manifest.generatedAt
+      }
+      activeProject.buildSafety.lastManifest = manifest
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      memory.pushEvent('build_dry_run', {
+        projectId: activeProject.id,
+        sectionId: section,
+        summary: manifest.summary,
+        blocked: result.blocked
+      })
+      await memory.save()
+      say(summarizeDryRun(result))
+      return
+    }
+
+    const manifestSummaryMatch = normalized.match(/^build manifest(?:\s+(\S+))?$/)
+    if (manifestSummaryMatch) {
+      if (!activeProject?.buildSafety?.lastManifest) {
+        say("there's no dry-run manifest yet. use 'Milo dry run build'.")
+        return
+      }
+
+      const manifest = activeProject.buildSafety.lastManifest
+      const counts = manifest.summary
+      const blocked = manifest.actions.filter(a => a.action === 'blocked').slice(0, 3)
+      const blockedText = blocked.length
+        ? blocked.map(a => `${a.reason} at ${a.x},${a.y},${a.z}`).join('; ')
+        : 'no blocked placements'
+
+      say(`${manifest.sectionId} manifest: ${counts.total} planned, ${counts.placeable} placeable, ${counts.alreadyCorrect} already correct. ${blockedText}. execution remains disabled.`)
+      return
+    }
+
+        const executorStatusMatch = normalized.match(/^executor status(?:\s+(\S+))?$/)
     if (executorStatusMatch) {
       if (!activeProject) {
         say("there's no active project.")

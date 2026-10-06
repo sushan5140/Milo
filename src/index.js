@@ -6,10 +6,12 @@ import { MemoryStore } from './memory.js'
 import { parseIntent, supportedResources } from './agent/intent.js'
 import { inventorySummary, toolClassFor } from './world/inventory.js'
 import { gatherResource } from './skills/gathering.js'
-import { nearestChest, serializePosition, depositItems } from './skills/storage.js'
+import { nearestChest, serializePosition, depositItems, countStoredItems } from './skills/storage.js'
 import { smeltResource } from './skills/smelting.js'
 import { ensureTool } from './skills/crafting.js'
 import { recoverDeathItems } from './safety/recovery.js'
+import { verifyHeldGoal, verifyDepositDelta, summarizeVerification } from './agent/verifier.js'
+import { withRetries } from './safety/retry.js'
 
 const {
   MILO_HOST = 'localhost',
@@ -93,12 +95,28 @@ function friendlyError(error) {
   return "that task broke somewhere, so I stopped instead of guessing."
 }
 
-async function runGatherTask(username, intent) {
+async function runGatherTask(username, intent, options = {}) {
   const { amount, resource } = intent
-  const taskId = `gather-${Date.now()}`
-  activeTask = { id: taskId, type: 'gather', resource: resource.canonical, amount, startedAt: new Date().toISOString() }
+  const taskId = options.taskId || `gather-${Date.now()}`
+  activeTask = {
+    id: taskId,
+    type: 'gather',
+    resource: resource.canonical,
+    amount,
+    intent,
+    resumed: Boolean(options.resumed),
+    startedAt: new Date().toISOString()
+  }
 
-  memory.pushEvent('task_started', activeTask)
+  memory.set('tasks.current', {
+    id: activeTask.id,
+    type: activeTask.type,
+    resource: activeTask.resource,
+    amount: activeTask.amount,
+    intent: activeTask.intent,
+    startedAt: activeTask.startedAt
+  })
+  memory.pushEvent(options.resumed ? 'task_resumed' : 'task_started', activeTask)
   await memory.save()
 
   say(`got it. going for ${amount} ${resource.canonical.replaceAll('_', ' ')}.`)
@@ -110,17 +128,30 @@ async function runGatherTask(username, intent) {
       if (tool.crafted) say(`I was missing a usable ${toolClass}, so I made a ${tool.tool.replaceAll('_', ' ')} first.`)
     }
 
-    const result = await gatherResource({
-      bot,
-      mcData,
-      resource,
-      amount,
-      onProgress: message => say(message),
-      shouldCancel: () => Boolean(activeTask?.cancelled)
-    })
+    let result = null
+    for (let planAttempt = 1; planAttempt <= 2; planAttempt += 1) {
+      result = await withRetries(
+        () => gatherResource({
+          bot,
+          mcData,
+          resource,
+          amount,
+          onProgress: message => say(message),
+          shouldCancel: () => Boolean(activeTask?.cancelled)
+        }),
+        {
+          attempts: 2,
+          onRetry: ({ code }) => say(`that route failed with ${code}. trying another way.`)
+        }
+      )
+
+      if (result.complete) break
+      if (activeTask?.cancelled) throw new Error('TASK_CANCELLED')
+      if (planAttempt < 2) say(`I only got to ${result.total}. replanning once before I give up.`)
+    }
 
     if (!result.complete) {
-      say(`I only got to ${result.total}. I couldn't find enough nearby.`)
+      say(`I only got to ${result.total}. I couldn't verify the full amount nearby.`)
     }
 
     const home = memory.get('places.home')
@@ -135,13 +166,20 @@ async function runGatherTask(username, intent) {
 
     if (resource.process === 'smelt' && result.total > 0) {
       say(`got the ore. smelting ${Math.min(amount, result.total)} now.`)
-      const smelt = await smeltResource({
-        bot,
-        mcData,
-        inputNames: resource.drops,
-        outputName: resource.finished[0],
-        amount: Math.min(amount, result.total)
-      })
+      const smelt = await withRetries(
+        () => smeltResource({
+          bot,
+          mcData,
+          inputNames: resource.drops,
+          outputName: resource.finished[0],
+          amount: Math.min(amount, result.total)
+        }),
+        {
+          attempts: 2,
+          delayMs: 2000,
+          onRetry: ({ code }) => say(`smelting hit ${code}. retrying once.`)
+        }
+      )
       processed = smelt.produced
       deliveryNames = resource.finished
       deliveryCount = smelt.produced
@@ -149,16 +187,34 @@ async function runGatherTask(username, intent) {
 
     const storage = memory.get('storage.default')
     let deposited = 0
+    let verification = null
 
     if (storage && storage.dimension === bot.game.dimension) {
       const targetCount = Math.min(amount, deliveryCount)
-      const deposit = await depositItems({
-        bot,
-        storage,
-        itemNames: deliveryNames,
-        count: targetCount
-      })
+      const beforeStored = await countStoredItems({ bot, storage, itemNames: deliveryNames })
+
+      const deposit = await withRetries(
+        () => depositItems({
+          bot,
+          storage,
+          itemNames: deliveryNames,
+          count: targetCount
+        }),
+        {
+          attempts: 2,
+          onRetry: ({ code }) => say(`storage step hit ${code}. retrying once.`)
+        }
+      )
       deposited = deposit.deposited
+
+      const afterStored = await countStoredItems({ bot, storage, itemNames: deliveryNames })
+      verification = verifyDepositDelta({
+        before: beforeStored,
+        after: afterStored,
+        requested: targetCount
+      })
+    } else {
+      verification = verifyHeldGoal(bot, deliveryNames, Math.min(amount, deliveryCount))
     }
 
     const outcome = {
@@ -169,30 +225,56 @@ async function runGatherTask(username, intent) {
       processed,
       totalHeld: deliveryCount,
       deposited,
-      complete: resource.process === 'smelt' ? processed >= amount : result.complete,
+      complete: Boolean(verification?.complete),
+      verification,
       finishedAt: new Date().toISOString()
     }
 
-    memory.pushEvent('task_completed', outcome)
+    if (outcome.complete) {
+      memory.set('tasks.pending', null)
+      memory.set('tasks.current', null)
+      memory.pushEvent('task_completed', outcome)
+    } else {
+      memory.set('tasks.pending', {
+        id: taskId,
+        intent,
+        reason: 'verification_failed',
+        verification,
+        savedAt: new Date().toISOString()
+      })
+      memory.set('tasks.current', null)
+      memory.pushEvent('task_incomplete', outcome)
+    }
     await memory.save()
 
-    if (deposited > 0) {
-      say(`back. I put ${deposited} ${resource.display || resource.canonical.replaceAll('_', ' ')} in storage.`)
+    if (deposited > 0 && verification?.complete) {
+      say(`back. I put ${deposited} ${resource.display || resource.canonical.replaceAll('_', ' ')} in storage — ${summarizeVerification(verification)}.`)
+    } else if (deposited > 0) {
+      say(`I deposited some, but the goal didn't verify: ${summarizeVerification(verification)}. say 'Milo resume' and I'll continue.`)
     } else if (home) {
       say(`back home. I've got ${deliveryCount} ${resource.display || resource.canonical.replaceAll('_', ' ')} on me — show me a chest with 'Milo remember storage' and I'll use it next time.`)
     } else {
       say(`done for now. I've got ${deliveryCount} on me. you haven't shown me home yet.`)
     }
   } catch (error) {
-    memory.pushEvent('task_failed', {
+    const reason = String(error?.message || error)
+    memory.set('tasks.current', null)
+    memory.set('tasks.pending', {
+      id: taskId,
+      intent,
+      reason,
+      savedAt: new Date().toISOString()
+    })
+    memory.pushEvent(reason === 'TASK_CANCELLED' ? 'task_paused' : 'task_failed', {
       id: taskId,
       resource: resource.canonical,
       amount,
-      error: String(error?.message || error)
+      error: reason
     })
     await memory.save()
     console.error('[Milo] Gather task failed:', error)
     say(friendlyError(error))
+    if (reason === 'TASK_CANCELLED') say("I saved the task. say 'Milo resume' whenever you want me to continue.")
   } finally {
     activeTask = null
   }
@@ -224,6 +306,23 @@ bot.on('chat', async (username, message) => {
   const normalized = rawIntent.toLowerCase()
 
   try {
+    if (/^(resume|resume task|continue task|continue)$/.test(normalized)) {
+      if (activeTask) {
+        say("I'm already working on something.")
+        return
+      }
+
+      const pending = memory.get('tasks.pending')
+      if (!pending?.intent) {
+        say("I don't have a paused task to resume.")
+        return
+      }
+
+      say(`resuming the ${pending.intent.amount} ${pending.intent.resource.display || pending.intent.resource.canonical} task.`)
+      void runGatherTask(username, pending.intent, { taskId: pending.id, resumed: true })
+      return
+    }
+
     if (/^(stop|cancel|stop task|cancel task)$/.test(normalized)) {
       if (!activeTask) {
         say("I'm not doing anything right now.")
@@ -245,9 +344,24 @@ bot.on('chat', async (username, message) => {
       const death = memory.get('recovery.lastDeath')
       say("going back to my last death spot to look for dropped items.")
       const result = await recoverDeathItems({ bot, death })
-      memory.pushEvent('death_recovery_attempted', { death, approached: result.approached })
+      memory.pushEvent('death_recovery_attempted', {
+        death,
+        approached: result.approached,
+        recovered: result.recovered,
+        recoveredCount: result.recoveredCount,
+        verified: result.verified
+      })
       await memory.save()
-      say(result.approached > 0 ? "I swept the nearby drops. check my inventory." : "I reached the spot, but I couldn't find dropped items nearby.")
+
+      if (result.verified) {
+        const summary = Object.entries(result.recovered)
+          .slice(0, 5)
+          .map(([name, count]) => `${count} ${name}`)
+          .join(', ')
+        say(`recovery verified. I picked up ${result.recoveredCount} items${summary ? `: ${summary}` : '.'}`)
+      } else {
+        say("I reached the death spot, but my inventory didn't increase, so I can't claim I recovered anything.")
+      }
       return
     }
 
@@ -377,6 +491,13 @@ bot.on('death', async () => {
 
   if (activeTask) {
     activeTask.cancelled = true
+    memory.set('tasks.pending', {
+      id: activeTask.id,
+      intent: activeTask.intent,
+      reason: 'death',
+      savedAt: new Date().toISOString()
+    })
+    memory.set('tasks.current', null)
     memory.pushEvent('task_interrupted_by_death', {
       id: activeTask.id,
       resource: activeTask.resource,

@@ -1,107 +1,79 @@
-function normalizeName(name) {
-  return name.trim().toLowerCase().replace(/\s+/g, ' ')
+const now = () => new Date().toISOString()
+const label = name => String(name).trim().toLowerCase().replace(/\s+/g, ' ')
+const slug = name => label(name).replace(/[^a-z0-9 _-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'project'
+export const STAGES = ['planning', 'materials', 'building', 'verification']
+export function createProject({name,description=''}) {
+  return {id:slug(name),name:String(name).trim(),description,status:'active',stage:'planning',
+    materials:{},notes:[],site:null,design:{style:null,constraints:[],reference:null,plan:null},
+    createdAt:now(),updatedAt:now()}
 }
-
-function now() {
-  return new Date().toISOString()
+export function addMaterial(project,resource,amount) {
+  const key=resource.canonical
+  const m=project.materials[key] || {canonical:key,display:resource.display||key.replaceAll('_',' '),target:0,delivered:0,resource}
+  m.target+=amount; m.resource=resource; project.materials[key]=m
+  if(project.stage==='planning') project.stage='materials'
+  project.updatedAt=now(); return project
 }
-
-export function createProject({ name, description = '' }) {
-  const id = normalizeName(name)
-  return {
-    id,
-    name: name.trim(),
-    description: description.trim(),
-    status: 'active',
-    materials: {},
-    createdAt: now(),
-    updatedAt: now()
+export function recordProjectDelivery(project,resource,amount) {
+  const m=project.materials[resource.canonical]
+  if(!m) return project
+  m.delivered=Math.min(m.target,m.delivered+Math.max(0,amount))
+  if(Object.keys(project.materials).length && !projectDeficits(project).length && project.status!=='complete') {
+    project.status='materials_ready'
   }
+  project.updatedAt=now(); return project
 }
-
-export function addMaterial(project, resource, amount) {
-  const key = resource.canonical
-  const current = project.materials[key] || {
-    canonical: key,
-    display: resource.display || key.replaceAll('_', ' '),
-    target: 0,
-    delivered: 0,
-    resource
-  }
-
-  current.target += amount
-  current.resource = resource
-  project.materials[key] = current
-  project.updatedAt = now()
-  return project
-}
-
-export function recordProjectDelivery(project, resource, amount) {
-  const key = resource.canonical
-  const material = project.materials[key]
-  if (!material) return project
-
-  material.delivered = Math.min(material.target, material.delivered + Math.max(0, amount))
-  project.updatedAt = now()
-
-  if (projectDeficits(project).length === 0) {
-    project.status = 'materials_ready'
-  }
-
-  return project
-}
-
 export function projectDeficits(project) {
-  return Object.values(project.materials)
-    .map(material => ({
-      ...material,
-      missing: Math.max(0, material.target - material.delivered)
-    }))
-    .filter(material => material.missing > 0)
-    .sort((a, b) => b.missing - a.missing)
+  return Object.values(project.materials).map(m=>({...m,missing:Math.max(0,m.target-m.delivered)}))
+    .filter(m=>m.missing>0).sort((a,b)=>b.missing-a.missing)
 }
-
-export function nextProjectDeficit(project) {
-  return projectDeficits(project)[0] || null
-}
-
+export const nextProjectDeficit=project=>projectDeficits(project)[0]||null
 export function projectProgress(project) {
-  const materials = Object.values(project.materials)
-  const target = materials.reduce((sum, item) => sum + item.target, 0)
-  const delivered = materials.reduce((sum, item) => sum + Math.min(item.delivered, item.target), 0)
-
-  return {
-    target,
-    delivered,
-    percent: target === 0 ? 0 : Math.round((delivered / target) * 100),
-    deficits: projectDeficits(project)
-  }
+  const materials=Object.values(project.materials)
+  const target=materials.reduce((s,m)=>s+m.target,0)
+  const delivered=materials.reduce((s,m)=>s+Math.min(m.delivered,m.target),0)
+  return {target,delivered,percent:target?Math.round(100*delivered/target):0,deficits:projectDeficits(project)}
 }
-
 export function summarizeProject(project) {
-  const progress = projectProgress(project)
-
-  if (progress.target === 0) {
-    return `${project.name}: no materials set yet.`
-  }
-
-  const missing = progress.deficits
-    .slice(0, 4)
-    .map(item => `${item.missing} ${item.display}`)
-    .join(', ')
-
-  return `${project.name}: ${progress.percent}% materials ready (${progress.delivered}/${progress.target}).${missing ? ` missing ${missing}.` : ' all listed materials are ready.'}`
+  const p=projectProgress(project)
+  const missing=p.deficits.slice(0,3).map(m=>`${m.missing} ${m.display}`).join(', ')
+  return `${project.name} [${project.stage}]: ${p.percent}% materials ready (${p.delivered}/${p.target}). ${missing?'missing '+missing:'No listed material deficits.'}`
 }
-
-export function findProject(projects, name) {
-  const wantedId = normalizeName(name)
-  const wantedLabel = normalizedLabel(name)
-  return Object.values(projects || {}).find(project =>
-    project.id === wantedId || normalizedLabel(project.name) === wantedLabel
-  ) || null
+export function findProject(projects,name) {
+  return Object.values(projects||{}).find(p=>p.id===slug(name)||label(p.name)===label(name))||null
 }
-
 export function listProjects(projects) {
-  return Object.values(projects || {})
-    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+  return Object.values(projects||{}).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)))
+}
+export function addProjectNote(project,note) {
+  const text=String(note).trim()
+  if(!text||text.length>500) throw new Error('INVALID_PROJECT_NOTE')
+  project.notes??=[]; project.notes.push({text,at:now()})
+  project.notes=project.notes.slice(-100); project.updatedAt=now();return project
+}
+export function setProjectStage(project,stage) {
+  if(!STAGES.includes(stage)) throw new Error('INVALID_PROJECT_STAGE')
+  if(project.status==='complete') throw new Error('PROJECT_COMPLETE')
+  project.stage=stage;project.updatedAt=now();return project
+}
+export function setProjectSite(project,position,dimension) {
+  project.site={x:Math.floor(position.x),y:Math.floor(position.y),z:Math.floor(position.z),dimension,savedAt:now()}
+  project.updatedAt=now();return project
+}
+export function setDesignConstraint(project,constraint) {
+  const text=String(constraint).trim()
+  if(!text||text.length>300) throw new Error('INVALID_DESIGN_CONSTRAINT')
+  project.design??={style:null,constraints:[],reference:null,plan:null}
+  project.design.constraints??=[]
+  if(!project.design.constraints.includes(text)) project.design.constraints.push(text)
+  project.updatedAt=now();return project
+}
+export function suggestProjectNext(project) {
+  if(project.status==='complete') return 'This project is already marked complete.'
+  const deficit=nextProjectDeficit(project)
+  if(deficit) return `Collect ${deficit.missing} ${deficit.display} next. Say Milo continue project.`
+  if(!project.site) return 'Choose a location. Stand there and say Milo project site here.'
+  if(!project.design?.plan) return 'Materials are listed; prepare a build plan and get approval before construction.'
+  if(project.stage==='verification') return 'Inspect the planned structure against the actual blocks.'
+  return 'Review the build plan; automatic construction is not enabled yet.'
 }

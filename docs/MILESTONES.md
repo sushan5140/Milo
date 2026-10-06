@@ -35,11 +35,11 @@
 
 ## M3 — Reliable Teammate
 - [x] Goal verification with storage/inventory state deltas
-- [~] General replanning — bounded retries + one gather replan implemented
+- [~] General replanning — bounded retries, directional search, tool replacement, and gather replan implemented
 - [x] Death-location memory + inventory-verified item recovery
-- [~] Hazard policies — health/hunger and adjacent lava/fire guards implemented
+- [~] Hazard policies — auto-eating plus health/hunger and adjacent lava/fire guards implemented
 - [x] Task cancellation
-- [x] Player interruption — stop/cancel + persistent resume implemented
+- [x] Player interruption — stop/cancel, persistent resume, and urgent come/help preemption implemented
 
 ## M4 — Shared Projects
 - [ ] Persistent named projects
@@ -58,8 +58,8 @@
 
 
 ## Next implementation batch
-1. Expand replanning beyond bounded retries: alternate search directions, broken-tool replacement mid-task, and recovery from unreachable goals.
-2. Add automatic eating/healing behavior instead of only refusing unsafe tasks.
-3. Add task replacement/priority ("stop coal and help me now").
+1. Add unreachable-goal recovery with alternative candidate selection rather than retrying the same target.
+2. Add stronger danger policies for mobs, falls, drowning and fire exposure.
+3. Add task replacement ("forget coal, get diamonds instead") distinct from temporary preemption.
 4. Run the documented live-world smoke test and patch integration failures.
 5. Begin M4 project memory once M3 survives real gameplay.

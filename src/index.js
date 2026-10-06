@@ -190,7 +190,7 @@ async function runGatherTask(username, intent, options = {}) {
     let verification = null
 
     if (storage && storage.dimension === bot.game.dimension) {
-      const targetCount = Math.min(amount, deliveryCount)
+      const depositCount = Math.min(amount, deliveryCount)
       const beforeStored = await countStoredItems({ bot, storage, itemNames: deliveryNames })
 
       const deposit = await withRetries(
@@ -198,7 +198,7 @@ async function runGatherTask(username, intent, options = {}) {
           bot,
           storage,
           itemNames: deliveryNames,
-          count: targetCount
+          count: depositCount
         }),
         {
           attempts: 2,
@@ -211,10 +211,10 @@ async function runGatherTask(username, intent, options = {}) {
       verification = verifyDepositDelta({
         before: beforeStored,
         after: afterStored,
-        requested: targetCount
+        requested: amount
       })
     } else {
-      verification = verifyHeldGoal(bot, deliveryNames, Math.min(amount, deliveryCount))
+      verification = verifyHeldGoal(bot, deliveryNames, amount)
     }
 
     const outcome = {

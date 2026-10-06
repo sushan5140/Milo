@@ -35,11 +35,12 @@
 
 ## M3 — Reliable Teammate
 - [x] Goal verification with storage/inventory state deltas
-- [~] General replanning — bounded retries, directional search, tool replacement, and gather replan implemented
+- [x] General replanning — bounded retries, directional search, alternate target selection, tool replacement, and gather replan implemented
 - [x] Death-location memory + inventory-verified item recovery
-- [~] Hazard policies — auto-eating plus health/hunger and adjacent lava/fire guards implemented
+- [x] Hazard policies — auto-eating, health/hunger, adjacent lava/fire, drowning/fire-state, and nearby-hostile checks implemented
 - [x] Task cancellation
-- [x] Player interruption — stop/cancel, persistent resume, and urgent come/help preemption implemented
+- [x] Player interruption — stop/cancel, persistent resume, urgent come/help preemption, and true task replacement
+- [ ] Live-world M3 integration test
 
 ## M4 — Shared Projects
 - [ ] Persistent named projects
@@ -58,8 +59,8 @@
 
 
 ## Next implementation batch
-1. Add unreachable-goal recovery with alternative candidate selection rather than retrying the same target.
-2. Add stronger danger policies for mobs, falls, drowning and fire exposure.
-3. Add task replacement ("forget coal, get diamonds instead") distinct from temporary preemption.
-4. Run the documented live-world smoke test and patch integration failures.
-5. Begin M4 project memory once M3 survives real gameplay.
+1. Begin M4 shared-project memory: named projects, persistent goals, material bills and status.
+2. Add project commands such as "start project", "project status", and "continue project".
+3. Connect resource-runner tasks to project material deficits.
+4. Keep live-world M0-M3 smoke testing as a parallel integration track.
+5. Patch any real-server incompatibilities before expanding destructive autonomy.

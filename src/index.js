@@ -12,7 +12,7 @@ import { ensureTool } from './skills/crafting.js'
 import { recoverDeathItems } from './safety/recovery.js'
 import { verifyHeldGoal, verifyDepositDelta, summarizeVerification } from './agent/verifier.js'
 import { withRetries } from './safety/retry.js'
-import { createProject, addMaterial, recordProjectDelivery, nextProjectDeficit, summarizeProject, findProject, listProjects, setProjectBuildPlan, setProjectSite, addProjectNote, setDesignConstraint, suggestProjectNext } from './projects/project.js'
+import { createProject, addMaterial, recordProjectDelivery, nextProjectDeficit, summarizeProject, findProject, listProjects, setProjectBuildPlan, setProjectSite, addProjectNote, setDesignConstraint, suggestProjectNext, ensureBuildSafety } from './projects/project.js'
 import { createBuildPlan, estimateMaterials, approveBuildPlan, reviseBuildPlan, summarizeBuildPlan, setBuildPalette, replacePaletteBlock } from './building/plan.js'
 import { observationsToBuildPlan } from './building/reference-adapter.js'
 import { footprintCorners } from './building/preview.js'
@@ -20,6 +20,9 @@ import { createImageReference, analyzeReferenceImage } from './building/image-in
 import { createHttpVisionAnalyzer } from './building/http-vision.js'
 import { syncPlanMaterialsToProject } from './building/material-sync.js'
 import { verifyPlanAgainstWorld, summarizeWorldVerification } from './building/world-verifier.js'
+import { stagePlanRevision, acceptPlanRevision, rejectPlanRevision } from './building/plan-diff.js'
+import { addProtectedZone, approveBuildSection, revokeBuildSectionApproval, createRollbackSnapshot, recordRollbackSnapshot, canExecuteSection } from './building/execution-safety.js'
+import { flattenExpectedBlocks } from './building/geometry.js'
 
 const {
   MILO_HOST = 'localhost',
@@ -519,6 +522,19 @@ bot.on('chat', async (username, message) => {
       say("analyzing the saved build reference.")
       const observations = await analyzeReferenceImage(activeProject.design.reference, visionAnalyzer)
       const plan = observationsToBuildPlan(observations)
+
+      if (activeProject.design?.plan) {
+        const pending = stagePlanRevision(activeProject, plan)
+        memory.set(`projects.${activeProject.id}`, activeProject)
+        memory.pushEvent('project_reference_revision_staged', {
+          projectId: activeProject.id,
+          changeCount: pending.diff.changes.length
+        })
+        await memory.save()
+        say(`reference analysis found ${pending.diff.changes.length} plan changes. I staged them instead of replacing the current plan. say 'Milo accept plan revision' or 'Milo reject plan revision'.`)
+        return
+      }
+
       setProjectBuildPlan(activeProject, plan)
       memory.set(`projects.${activeProject.id}`, activeProject)
       memory.pushEvent('project_reference_analyzed', {
@@ -533,7 +549,143 @@ bot.on('chat', async (username, message) => {
       return
     }
 
-    if (/^(sync build materials|sync plan materials)$/.test(normalized)) {
+    if (/^accept plan revision$/.test(normalized)) {
+      if (!activeProject?.design?.pendingRevision) {
+        say("there's no pending plan revision.")
+        return
+      }
+      const plan = acceptPlanRevision(activeProject)
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      memory.pushEvent('build_plan_revision_accepted', { projectId: activeProject.id })
+      await memory.save()
+      say(`revision accepted as a new draft: ${summarizeBuildPlan(plan)}. approval is intentionally reset.`)
+      return
+    }
+
+    if (/^reject plan revision$/.test(normalized)) {
+      if (!activeProject?.design?.pendingRevision) {
+        say("there's no pending plan revision.")
+        return
+      }
+      rejectPlanRevision(activeProject)
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      memory.pushEvent('build_plan_revision_rejected', { projectId: activeProject.id })
+      await memory.save()
+      say("revision rejected. keeping the current plan unchanged.")
+      return
+    }
+
+    if (/^(plan revision|show plan revision)$/.test(normalized)) {
+      const pending = activeProject?.design?.pendingRevision
+      if (!pending) {
+        say("there's no pending plan revision.")
+        return
+      }
+      say(`${pending.diff.summary}. approval would be invalidated: ${pending.diff.approvalInvalidated ? 'yes' : 'no'}.`)
+      return
+    }
+
+    const protectRadiusMatch = normalized.match(/^protect build area\s+(.+?)\s+radius\s+(\d+)$/)
+    if (protectRadiusMatch) {
+      if (!activeProject) {
+        say("there's no active project.")
+        return
+      }
+
+      const radius = Math.min(Math.max(Number(protectRadiusMatch[2]), 1), 128)
+      const p = bot.entity.position
+      const safety = ensureBuildSafety(activeProject)
+      const zone = addProtectedZone(safety, {
+        name: protectRadiusMatch[1],
+        min: { x: Math.floor(p.x) - radius, y: Math.floor(p.y) - radius, z: Math.floor(p.z) - radius },
+        max: { x: Math.floor(p.x) + radius, y: Math.floor(p.y) + radius, z: Math.floor(p.z) + radius },
+        dimension: bot.game.dimension
+      })
+
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      await memory.save()
+      say(`protected zone "${zone.name}" saved. future build execution must not modify blocks inside it.`)
+      return
+    }
+
+    const approveSectionMatch = normalized.match(/^approve build section\s+(\S+)$/)
+    if (approveSectionMatch) {
+      if (!activeProject) {
+        say("there's no active project.")
+        return
+      }
+      const safety = ensureBuildSafety(activeProject)
+      approveBuildSection(safety, approveSectionMatch[1], username)
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      await memory.save()
+      say(`section ${approveSectionMatch[1]} approved, but the executor itself is still disabled.`)
+      return
+    }
+
+    const revokeSectionMatch = normalized.match(/^revoke build section\s+(\S+)$/)
+    if (revokeSectionMatch) {
+      if (!activeProject) {
+        say("there's no active project.")
+        return
+      }
+      const safety = ensureBuildSafety(activeProject)
+      revokeBuildSectionApproval(safety, revokeSectionMatch[1])
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      await memory.save()
+      say(`section ${revokeSectionMatch[1]} approval revoked.`)
+      return
+    }
+
+    const rollbackMatch = normalized.match(/^snapshot build section\s+(\S+)$/)
+    if (rollbackMatch) {
+      if (!activeProject?.design?.plan || !activeProject?.site) {
+        say("I need both a build plan and project site first.")
+        return
+      }
+
+      const sectionId = rollbackMatch[1]
+      const expected = flattenExpectedBlocks(activeProject.design.plan, activeProject.site)
+        .filter(item => item.role === sectionId || item.role === sectionId.replace(/s$/, ''))
+
+      if (!expected.length) {
+        say(`I couldn't map section "${sectionId}" to planned positions.`)
+        return
+      }
+
+      const positions = expected.slice(0, 2048).map(item => {
+        const block = bot.blockAt(new (bot.entity.position.constructor)(item.x, item.y, item.z))
+        return {
+          x: item.x, y: item.y, z: item.z,
+          before: block ? { name: block.name, stateId: block.stateId ?? null } : null
+        }
+      })
+
+      const safety = ensureBuildSafety(activeProject)
+      const snapshot = createRollbackSnapshot({
+        projectId: activeProject.id,
+        sectionId,
+        positions
+      })
+      recordRollbackSnapshot(safety, snapshot)
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      await memory.save()
+      say(`saved rollback metadata for ${positions.length} positions in section ${sectionId}.`)
+      return
+    }
+
+    const executorStatusMatch = normalized.match(/^executor status(?:\s+(\S+))?$/)
+    if (executorStatusMatch) {
+      if (!activeProject) {
+        say("there's no active project.")
+        return
+      }
+      const section = executorStatusMatch[1] || 'walls'
+      const gate = canExecuteSection(ensureBuildSafety(activeProject), section)
+      say(`executor enabled: ${gate.executionEnabled ? 'yes' : 'no'}; section ${section} approved: ${gate.sectionApproved ? 'yes' : 'no'}; allowed now: ${gate.allowed ? 'yes' : 'no'}.`)
+      return
+    }
+
+        if (/^(sync build materials|sync plan materials)$/.test(normalized)) {
       if (!activeProject?.design?.plan) {
         say("there's no build plan to sync.")
         return

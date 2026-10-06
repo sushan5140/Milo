@@ -12,6 +12,7 @@ import { ensureTool } from './skills/crafting.js'
 import { recoverDeathItems } from './safety/recovery.js'
 import { verifyHeldGoal, verifyDepositDelta, summarizeVerification } from './agent/verifier.js'
 import { withRetries } from './safety/retry.js'
+import { createProject, addMaterial, recordProjectDelivery, nextProjectDeficit, summarizeProject, findProject } from './projects/project.js'
 
 const {
   MILO_HOST = 'localhost',
@@ -144,6 +145,7 @@ async function runGatherTask(username, intent, options = {}) {
     amount,
     intent,
     resumed: Boolean(options.resumed),
+    projectId: options.projectId || null,
     startedAt: new Date().toISOString()
   }
 
@@ -153,6 +155,7 @@ async function runGatherTask(username, intent, options = {}) {
     resource: activeTask.resource,
     amount: activeTask.amount,
     intent: activeTask.intent,
+    projectId: activeTask.projectId,
     startedAt: activeTask.startedAt
   })
   memory.pushEvent(options.resumed ? 'task_resumed' : 'task_started', activeTask)
@@ -266,7 +269,24 @@ async function runGatherTask(username, intent, options = {}) {
       deposited,
       complete: Boolean(verification?.complete),
       verification,
+      projectId: activeTask?.projectId || options.projectId || null,
       finishedAt: new Date().toISOString()
+    }
+
+    if (outcome.projectId && verification) {
+      const project = memory.get(`projects.${outcome.projectId}`)
+      if (project) {
+        const verifiedDelivery = verification.delta ?? (verification.complete ? amount : 0)
+        if (verifiedDelivery > 0) {
+          recordProjectDelivery(project, resource, verifiedDelivery)
+          memory.set(`projects.${outcome.projectId}`, project)
+          memory.pushEvent('project_material_delivered', {
+            projectId: outcome.projectId,
+            resource: resource.canonical,
+            amount: verifiedDelivery
+          })
+        }
+      }
     }
 
     if (outcome.complete) {
@@ -279,6 +299,7 @@ async function runGatherTask(username, intent, options = {}) {
         intent,
         reason: 'verification_failed',
         verification,
+        projectId: activeTask?.projectId || options.projectId || null,
         savedAt: new Date().toISOString()
       })
       memory.set('tasks.current', null)
@@ -345,6 +366,108 @@ bot.on('chat', async (username, message) => {
   const normalized = rawIntent.toLowerCase()
 
   try {
+    const startProjectMatch = normalized.match(/^start project\s+(.+)$/)
+    if (startProjectMatch) {
+      const name = startProjectMatch[1].trim()
+      const project = createProject({ name })
+      memory.set(`projects.${project.id}`, project)
+      memory.set('projectState.activeId', project.id)
+      memory.pushEvent('project_started', { id: project.id, name: project.name })
+      await memory.save()
+      say(`project "${project.name}" started. add materials like: Milo project needs 128 spruce.`)
+      return
+    }
+
+    const projectNeedsMatch = normalized.match(/^project needs\s+(\d+)\s+(.+)$/)
+    if (projectNeedsMatch) {
+      const activeId = memory.get('projectState.activeId')
+      const project = activeId ? memory.get(`projects.${activeId}`) : null
+      if (!project) {
+        say("start a project first with 'Milo start project <name>'.")
+        return
+      }
+
+      const amount = Math.min(Math.max(Number(projectNeedsMatch[1]), 1), 2304)
+      const materialIntent = parseIntent(`get ${amount} ${projectNeedsMatch[2]}`)
+      if (materialIntent.type !== 'gather') {
+        say(`I don't know that material yet. say 'Milo resources' for the current resource list.`)
+        return
+      }
+
+      addMaterial(project, materialIntent.resource, amount)
+      memory.set(`projects.${project.id}`, project)
+      memory.pushEvent('project_material_added', {
+        projectId: project.id,
+        resource: materialIntent.resource.canonical,
+        amount
+      })
+      await memory.save()
+      say(`added ${amount} ${materialIntent.resource.display || materialIntent.resource.canonical} to ${project.name}. ${summarizeProject(project)}`)
+      return
+    }
+
+    const projectStatusMatch = normalized.match(/^project status(?:\s+(.+))?$/)
+    if (projectStatusMatch) {
+      const projects = memory.get('projects') || {}
+      const explicit = projectStatusMatch[1]?.trim()
+      const activeId = memory.get('projectState.activeId')
+      const project = explicit ? findProject(projects, explicit) : (activeId ? projects[activeId] : null)
+
+      if (!project) {
+        say(explicit ? `I don't know a project called "${explicit}".` : "there's no active project yet.")
+        return
+      }
+
+      say(summarizeProject(project))
+      return
+    }
+
+    const useProjectMatch = normalized.match(/^(?:use|switch to) project\s+(.+)$/)
+    if (useProjectMatch) {
+      const projects = memory.get('projects') || {}
+      const project = findProject(projects, useProjectMatch[1])
+      if (!project) {
+        say(`I don't know a project called "${useProjectMatch[1]}".`)
+        return
+      }
+
+      memory.set('projectState.activeId', project.id)
+      await memory.save()
+      say(`okay, ${project.name} is the active project. ${summarizeProject(project)}`)
+      return
+    }
+
+    if (/^(continue project|work on project|continue the project)$/.test(normalized)) {
+      if (activeTask) {
+        say("I'm already working on something. stop or replace that task first.")
+        return
+      }
+
+      const activeId = memory.get('projectState.activeId')
+      const project = activeId ? memory.get(`projects.${activeId}`) : null
+      if (!project) {
+        say("there's no active project to continue.")
+        return
+      }
+
+      const deficit = nextProjectDeficit(project)
+      if (!deficit) {
+        say(`${project.name} has all listed materials ready. the next phase is construction planning.`)
+        return
+      }
+
+      const intent = {
+        type: 'gather',
+        amount: deficit.missing,
+        requested: deficit.display,
+        resource: deficit.resource
+      }
+
+      say(`continuing ${project.name}. next bottleneck is ${deficit.missing} ${deficit.display}.`)
+      void runGatherTask(username, intent, { projectId: project.id })
+      return
+    }
+
     const replacementMatch = normalized.match(/^(?:forget|drop|cancel|stop).+?\b((?:get|grab|bring|fetch|mine|collect)(?: me)?\s+.+?)(?:\s+instead)?$/)
 
     if (replacementMatch) {

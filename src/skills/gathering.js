@@ -100,6 +100,8 @@ export async function gatherResource({
   let mined = 0
   let hazardousBlocksSkipped = 0
   let searchStep = 0
+  let loopIterations = 0
+  const maxLoopIterations = Math.max(32, Math.min(2048, (needed * 8) + 32))
   const blacklist = new Set()
   const searchOffsets = [
     [16, 0], [0, 16], [-16, 0], [0, -16],
@@ -107,6 +109,11 @@ export async function gatherResource({
   ]
 
   while (countItems(bot, resource.drops) < amount) {
+    loopIterations += 1
+    if (loopIterations > maxLoopIterations) {
+      onProgress("I hit the bounded search limit without verifying enough drops, so I'm stopping instead of looping forever.")
+      break
+    }
     if (shouldCancel()) throw new Error('TASK_CANCELLED')
     const safetyNow = survivalCheck(bot)
     if (!safetyNow.safe) {
@@ -183,6 +190,8 @@ export async function gatherResource({
     total,
     mined,
     hazardousBlocksSkipped,
+    loopIterations,
+    searchLimitReached: loopIterations > maxLoopIterations,
     complete: total >= amount
   }
 }

@@ -59,8 +59,20 @@
 
 
 ## Next implementation batch
-1. Improve construction-plan fidelity: exact block roles, crafted-block dependencies, stairs/slabs/orientation and window/door placement.
-2. Add plan diff/revision workflow so a new image analysis can be compared against the approved plan before replacement.
-3. Add project material accounting for crafted blocks instead of approximate base-resource substitution.
-4. Add staged executor design with permissions, protected zones, per-section approval and rollback metadata — but keep execution disabled.
-5. Run the live-world M0-M3 smoke test before enabling any permanent block placement.
+1. Build a dry-run executor that simulates section placement without modifying the world.
+2. Add conflict detection for protected zones, occupied blocks and unsupported placements.
+3. Add exact orientation/state generation for stairs, doors and slabs across all structure sections.
+4. Add rollback-preview and section-by-section execution manifests.
+5. Run the live-world M0-M3 smoke test before any permanent placement can be enabled.
+
+
+## M6 — Execution Safety Design
+- [x] Crafted-block dependency expansion for raw-resource accounting
+- [x] Block-state/orientation metadata helpers
+- [x] Plan diff + staged revision accept/reject workflow
+- [x] Protected-zone model
+- [x] Per-section approvals
+- [x] Rollback snapshot metadata
+- [x] Executor gate defaults to disabled
+- [ ] Permanent block placement — intentionally disabled
+- [ ] Live-world validation before any executor enablement

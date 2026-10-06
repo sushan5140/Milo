@@ -1,18 +1,23 @@
 import { createVisionAnalyzer } from './image-ingest.js'
 
-export function createHttpVisionAnalyzer({ endpoint, apiKey = null, model = null }) {
+export function createHttpVisionAnalyzer({ endpoint, apiKey = null, model = null, timeoutMs = 30000 }) {
   if (!endpoint) throw new Error('VISION_ENDPOINT_MISSING')
 
   return createVisionAnalyzer({
     name: 'http-vision',
     version: model || 'custom',
     analyze: async reference => {
-      const response = await fetch(endpoint, {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs))
+      let response
+      try {
+        response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
           ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
         },
+        signal: controller.signal,
         body: JSON.stringify({
           model,
           reference,
@@ -32,7 +37,13 @@ export function createHttpVisionAnalyzer({ endpoint, apiKey = null, model = null
             }
           }
         })
-      })
+        })
+      } catch (error) {
+        if (error?.name === 'AbortError') throw new Error('VISION_TIMEOUT')
+        throw error
+      } finally {
+        clearTimeout(timeout)
+      }
 
       if (!response.ok) throw new Error(`VISION_HTTP_${response.status}`)
       const data = await response.json()

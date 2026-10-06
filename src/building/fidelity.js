@@ -72,3 +72,32 @@ export function applyBlockStateToExpected(expected, spec) {
     role: spec.role || expected.role || 'general'
   }
 }
+
+
+export function doorBlockSpecs(block, facing = 'north', hinge = 'left') {
+  return {
+    lower: blockSpec(block, { role: 'door', facing }),
+    upper: {
+      block,
+      role: 'door',
+      state: { facing, half: 'upper', hinge }
+    }
+  }
+}
+
+export function slabBlockSpec(block, type = 'bottom', role = 'general') {
+  return {
+    block,
+    role,
+    state: { type }
+  }
+}
+
+export function stairBlockSpec(block, {
+  facing = 'north',
+  half = 'bottom',
+  shape = 'straight',
+  role = 'general'
+} = {}) {
+  return blockSpec(block, { role, facing, half, shape })
+}

@@ -50,17 +50,17 @@
 - [~] Collaborative task suggestions — next-material bottleneck selection implemented
 
 ## M5 — Image-to-Build
-- [~] reference-image interpretation — observation-to-plan adapter implemented; actual image ingestion/model analysis pending
-- [x] editable weighted block-palette planning; image-derived palette still pending
+- [x] reference-image pipeline contract + URL ingestion + pluggable HTTP vision analysis + observation-to-plan adapter
+- [x] editable weighted block-palette planning + analyzer-supplied image palette support
 - [x] footprint/height planning model, revision/approval, and non-destructive perimeter-walk preview
-- [x] deterministic planning-stage material estimate + section inference for foundation/walls/roof
+- [x] deterministic material estimate + richer foundation/walls/openings/roof geometry
 - [ ] build executor — intentionally locked pending live-world verification
-- [ ] visual/world-state verification — pending
+- [x] read-only plan-vs-world verification with mismatch reporting
 
 
 ## Next implementation batch
-1. Add an actual image-ingestion boundary (file/URL metadata + pluggable vision analyzer) that emits reference observations.
-2. Add palette-to-resource translation so build plans can populate project material bills automatically.
-3. Add richer geometry/layer generation for doors, windows, roof slopes and decorative regions.
-4. Add a plan-vs-world verifier that can compare intended blocks to observed blocks without modifying the world.
-5. Keep automatic permanent construction locked until live-world M0-M3 integration testing passes.
+1. Improve construction-plan fidelity: exact block roles, crafted-block dependencies, stairs/slabs/orientation and window/door placement.
+2. Add plan diff/revision workflow so a new image analysis can be compared against the approved plan before replacement.
+3. Add project material accounting for crafted blocks instead of approximate base-resource substitution.
+4. Add staged executor design with permissions, protected zones, per-section approval and rollback metadata — but keep execution disabled.
+5. Run the live-world M0-M3 smoke test before enabling any permanent block placement.

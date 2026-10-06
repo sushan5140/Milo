@@ -25,20 +25,21 @@
 > M1 code is implemented but not considered reliable until tested against a live Java world. Smelting is intentionally deferred to M2.
 
 ## M2 — Craft + Smelt
-- [ ] Craft missing tools
-- [~] Furnace discovery/placement — discovery implemented, placement still pending
-- [x] Fuel selection for coal/charcoal
-- [x] Smelting job pipeline using an existing furnace
+- [x] Craft missing tools with mining-tier requirements
+- [x] Furnace discovery
+- [x] Craft/place furnace when none exists
+- [x] Multi-fuel selection
+- [x] Smelting job pipeline
 - [x] Distinguish raw ore vs ingot intent
-- [ ] Live-world furnace integration test
+- [ ] Live-world crafting/furnace integration test
 
 ## M3 — Reliable Teammate
 - [ ] Goal verification
-- [ ] Replanning
-- [ ] death/item recovery
-- [ ] hazard policies
-- [ ] task cancellation
-- [ ] player interruption
+- [ ] General replanning
+- [x] Death-location memory + explicit item recovery
+- [~] Hazard policies — health/hunger and adjacent lava/fire guards implemented
+- [x] Task cancellation
+- [~] Player interruption — stop/cancel implemented; task replacement/resume still pending
 
 ## M4 — Shared Projects
 - [ ] Persistent named projects
@@ -54,3 +55,11 @@
 - [ ] materials plan
 - [ ] build executor
 - [ ] visual/world-state verification
+
+
+## Next implementation batch
+1. Goal verifier: compare requested outcome with actual inventory/storage/world state.
+2. Retry/replan policy for path failures, missing blocks, broken tools and busy furnaces.
+3. Resume interrupted tasks rather than discarding them.
+4. Better death recovery verification (compare recovered inventory snapshot).
+5. First live-world smoke-test checklist and diagnostics.

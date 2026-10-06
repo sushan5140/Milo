@@ -79,6 +79,11 @@ export function syncPlanMaterialsToProject(project, plan, parseIntent) {
   project.design.unresolvedMaterials = unresolved
   project.design.craftedMaterialTargets = crafted
   project.design.rawMaterialTargets = raw
+  const hasDeficit = Object.values(project.materials).some(material => material.delivered < material.target)
+  if (Object.keys(project.materials).length) {
+    project.stage = hasDeficit ? 'materials' : project.stage
+    if (project.status !== 'complete') project.status = hasDeficit ? 'active' : 'materials_ready'
+  }
   project.updatedAt = new Date().toISOString()
 
   return { bill, unresolved, crafted, raw }

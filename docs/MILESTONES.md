@@ -43,11 +43,11 @@
 - [ ] Live-world M3 integration test
 
 ## M4 — Shared Projects
-- [ ] Persistent named projects
-- [ ] Material bill
-- [ ] Progress tracking
-- [ ] "continue project"
-- [ ] collaborative task suggestions
+- [x] Persistent named projects
+- [x] Material bill
+- [x] Progress tracking from verified deliveries
+- [x] "continue project" dispatches the largest material deficit to Resource Runner
+- [~] Collaborative task suggestions — next-material bottleneck selection implemented
 
 ## M5 — Image-to-Build
 - [ ] reference-image interpretation
@@ -59,8 +59,8 @@
 
 
 ## Next implementation batch
-1. Begin M4 shared-project memory: named projects, persistent goals, material bills and status.
-2. Add project commands such as "start project", "project status", and "continue project".
-3. Connect resource-runner tasks to project material deficits.
-4. Keep live-world M0-M3 smoke testing as a parallel integration track.
-5. Patch any real-server incompatibilities before expanding destructive autonomy.
+1. Add richer project goals and stages beyond materials: planning, site, build, verify.
+2. Add project notes/decisions so Milo remembers design constraints and player preferences per project.
+3. Add smarter collaborative suggestions based on project bottlenecks and current inventory/world context.
+4. Start M5 reference-image -> build-plan data structures without executing destructive building yet.
+5. Keep live-world M0-M3 smoke testing as a parallel integration track.

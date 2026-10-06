@@ -55,20 +55,23 @@ export function planToResourceBill(plan, parseIntent) {
 export function syncPlanMaterialsToProject(project, plan, parseIntent) {
   const { bill, unresolved, crafted, raw } = planToResourceBill(plan, parseIntent)
 
+  const previousMaterials = project.materials || {}
   project.materials = {}
   for (const item of bill) {
     const key = item.resource.canonical
+    const previous = previousMaterials[key]
     const current = project.materials[key] || {
       canonical: key,
       display: item.resource.display || key.replaceAll('_', ' '),
       target: 0,
-      delivered: 0,
+      delivered: Math.max(0, Number(previous?.delivered || 0)),
       resource: item.resource,
       sources: []
     }
 
     current.target += item.count
     current.sources.push({ block: item.block, count: item.count })
+    current.delivered = Math.min(current.delivered, current.target)
     project.materials[key] = current
   }
 

@@ -3,6 +3,10 @@ import mineflayer from 'mineflayer'
 import minecraftData from 'minecraft-data'
 import { pathfinder, Movements, goals } from 'mineflayer-pathfinder'
 import { MemoryStore } from './memory.js'
+import { parseIntent, supportedResources } from './agent/intent.js'
+import { inventorySummary } from './world/inventory.js'
+import { gatherResource } from './skills/gathering.js'
+import { nearestChest, serializePosition, depositItems } from './skills/storage.js'
 
 const {
   MILO_HOST = 'localhost',
@@ -28,6 +32,8 @@ const memory = new MemoryStore(MILO_MEMORY_FILE)
 await memory.load()
 
 let owner = MILO_OWNER || memory.get('owner.username') || ''
+let mcData = null
+let activeTask = null
 
 function say(message) {
   bot.chat(message)
@@ -41,8 +47,114 @@ function stripWakeWord(message) {
   return message.trim().replace(/^milo[,:]?\s*/i, '').trim()
 }
 
+function posLabel(position) {
+  return `${Math.floor(position.x)}, ${Math.floor(position.y)}, ${Math.floor(position.z)}`
+}
+
+async function goHome() {
+  const home = memory.get('places.home')
+  if (!home) throw new Error('HOME_UNKNOWN')
+  if (home.dimension && home.dimension !== bot.game.dimension) throw new Error('HOME_OTHER_DIMENSION')
+  await bot.pathfinder.goto(new goals.GoalNear(home.x, home.y, home.z, 2))
+}
+
+function friendlyError(error) {
+  const message = String(error?.message || error)
+
+  if (message.startsWith('MISSING_TOOL:')) {
+    return `I need a ${message.split(':')[1]} before I can do that.`
+  }
+  if (message.startsWith('SURVIVAL_CHECK_FAILED:')) {
+    return `I'm not risking it yet — ${message.split(':').slice(1).join(':')}.`
+  }
+  if (message === 'HOME_UNKNOWN') return "I can gather it, but show me home first with 'Milo remember home'."
+  if (message === 'HOME_OTHER_DIMENSION') return "home is in another dimension. cross-dimension return isn't wired yet."
+  if (message === 'STORAGE_MISSING') return "the storage I remembered isn't there anymore."
+  if (message.startsWith('CANNOT_DIG:')) return `I reached it, but I can't safely dig ${message.split(':')[1]}.`
+  return "that task broke somewhere, so I stopped instead of guessing."
+}
+
+async function runGatherTask(username, intent) {
+  const { amount, resource } = intent
+  const taskId = `gather-${Date.now()}`
+  activeTask = { id: taskId, type: 'gather', resource: resource.canonical, amount, startedAt: new Date().toISOString() }
+
+  memory.pushEvent('task_started', activeTask)
+  await memory.save()
+
+  say(`got it. going for ${amount} ${resource.canonical.replaceAll('_', ' ')}.`)
+
+  try {
+    const result = await gatherResource({
+      bot,
+      mcData,
+      resource,
+      amount,
+      onProgress: message => say(message)
+    })
+
+    if (!result.complete) {
+      say(`I only got to ${result.total}. I couldn't find enough nearby.`)
+    }
+
+    const home = memory.get('places.home')
+    if (home) {
+      say('heading back.')
+      await goHome()
+    }
+
+    const storage = memory.get('storage.default')
+    let deposited = 0
+
+    if (storage && storage.dimension === bot.game.dimension) {
+      const targetCount = Math.min(amount, result.total)
+      const deposit = await depositItems({
+        bot,
+        storage,
+        itemNames: resource.drops,
+        count: targetCount
+      })
+      deposited = deposit.deposited
+    }
+
+    const outcome = {
+      id: taskId,
+      requested: amount,
+      resource: resource.canonical,
+      gathered: result.gathered,
+      totalHeld: result.total,
+      deposited,
+      complete: result.complete,
+      finishedAt: new Date().toISOString()
+    }
+
+    memory.pushEvent('task_completed', outcome)
+    await memory.save()
+
+    if (deposited > 0) {
+      say(`back. I put ${deposited} ${resource.canonical.replaceAll('_', ' ')} in storage.`)
+    } else if (home) {
+      say(`back home. I've got ${result.total} on me — show me a chest with 'Milo remember storage' and I'll use it next time.`)
+    } else {
+      say(`done for now. I've got ${result.total} on me. you haven't shown me home yet.`)
+    }
+  } catch (error) {
+    memory.pushEvent('task_failed', {
+      id: taskId,
+      resource: resource.canonical,
+      amount,
+      error: String(error?.message || error)
+    })
+    await memory.save()
+    console.error('[Milo] Gather task failed:', error)
+    say(friendlyError(error))
+  } finally {
+    activeTask = null
+  }
+}
+
 bot.once('spawn', async () => {
-  const mcData = minecraftData(bot.version)
+  mcData = minecraftData(bot.version)
   bot.pathfinder.setMovements(new Movements(bot, mcData))
   console.log(`[Milo] Spawned on ${MILO_HOST}:${MILO_PORT} as ${MILO_USERNAME} (${bot.version})`)
   if (owner) console.log(`[Milo] Owner: ${owner}`)
@@ -63,29 +175,44 @@ bot.on('chat', async (username, message) => {
     return
   }
 
-  const intent = stripWakeWord(message).toLowerCase()
+  const rawIntent = stripWakeWord(message)
+  const normalized = rawIntent.toLowerCase()
 
   try {
-    if (/^(come|come here|follow me)$/.test(intent)) {
+    if (/^(come|come here|follow me)$/.test(normalized)) {
+      if (activeTask) {
+        say("I'm in the middle of a task. cancellation/interruption comes in the recovery phase.")
+        return
+      }
+
       const target = bot.players[username]?.entity
       if (!target) {
         say("I can't see you right now.")
         return
       }
+
       say('coming.')
       await bot.pathfinder.goto(new goals.GoalNear(target.position.x, target.position.y, target.position.z, 2))
       say('here.')
       return
     }
 
-    if (/^status$/.test(intent)) {
-      const p = bot.entity.position
+    if (/^status$/.test(normalized)) {
       const home = memory.get('places.home')
-      say(`I'm at ${Math.floor(p.x)}, ${Math.floor(p.y)}, ${Math.floor(p.z)}. ${home ? 'I remember home.' : "I don't know home yet."}`)
+      const storage = memory.get('storage.default')
+      const task = activeTask ? `busy with ${activeTask.amount} ${activeTask.resource}` : 'idle'
+      say(`I'm at ${posLabel(bot.entity.position)}. ${task}. home: ${home ? 'known' : 'unknown'}, storage: ${storage ? 'known' : 'unknown'}.`)
       return
     }
 
-    if (/^(remember|set) home$/.test(intent)) {
+    if (/^inventory$/.test(normalized)) {
+      const summary = inventorySummary(bot)
+      const top = Object.entries(summary).slice(0, 8).map(([name, count]) => `${count} ${name}`).join(', ')
+      say(top ? `I've got ${top}${Object.keys(summary).length > 8 ? ', and more.' : '.'}` : "my inventory is empty.")
+      return
+    }
+
+    if (/^(remember|set) home$/.test(normalized)) {
       const p = bot.entity.position
       memory.set('places.home', {
         x: Math.floor(p.x),
@@ -99,7 +226,20 @@ bot.on('chat', async (username, message) => {
       return
     }
 
-    if (/^(where is|where's) home$/.test(intent)) {
+    if (/^(remember|set) storage$/.test(normalized)) {
+      const chest = nearestChest(bot, 8)
+      if (!chest) {
+        say("I don't see a chest or barrel close enough. stand near the one you want me to use.")
+        return
+      }
+
+      memory.set('storage.default', serializePosition(chest, bot.game.dimension))
+      await memory.save()
+      say(`got it. I'll use the ${chest.name.replace('_', ' ')} at ${posLabel(chest.position)} as our default storage.`)
+      return
+    }
+
+    if (/^(where is|where's) home$/.test(normalized)) {
       const home = memory.get('places.home')
       if (!home) {
         say("you haven't shown me home yet.")
@@ -109,22 +249,42 @@ bot.on('chat', async (username, message) => {
       return
     }
 
-    if (/^(go|return) home$/.test(intent)) {
-      const home = memory.get('places.home')
-      if (!home) {
-        say("I don't know where home is yet.")
+    if (/^(go|return) home$/.test(normalized)) {
+      if (activeTask) {
+        say("I'm already working on something.")
         return
       }
-      say("heading home.")
-      await bot.pathfinder.goto(new goals.GoalNear(home.x, home.y, home.z, 2))
+      say('heading home.')
+      await goHome()
       say("I'm home.")
       return
     }
 
-    say("I heard you. V0 only understands come, status, remember home, where is home, and go home so far.")
+    if (/^(resources|what can you get|what can you mine)$/.test(normalized)) {
+      say(`right now I understand: ${supportedResources().join(', ')}.`)
+      return
+    }
+
+    const parsed = parseIntent(normalized)
+
+    if (parsed.type === 'unknown_resource') {
+      say(`I don't know how to gather ${parsed.requested} yet. say 'Milo resources' for my current list.`)
+      return
+    }
+
+    if (parsed.type === 'gather') {
+      if (activeTask) {
+        say(`I'm already busy getting ${activeTask.amount} ${activeTask.resource}.`)
+        return
+      }
+      void runGatherTask(username, parsed)
+      return
+    }
+
+    say("I heard you. try 'Milo get me 12 coal', 'Milo remember storage', 'Milo inventory', or 'Milo status'.")
   } catch (error) {
     console.error('[Milo] Action failed:', error)
-    say("that didn't work. I stopped instead of guessing.")
+    say(friendlyError(error))
   }
 })
 

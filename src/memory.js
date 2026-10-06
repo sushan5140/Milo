@@ -9,6 +9,8 @@ export class MemoryStore {
       places: {},
       storage: {},
       projects: {},
+      tasks: { current: null, pending: null },
+      recovery: { lastDeath: null },
       events: []
     }
   }

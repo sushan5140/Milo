@@ -1208,6 +1208,17 @@ bot.on('chat', async (username, message) => {
 
       let resumeIntent = pending.intent
 
+      if (!pending.projectId && Number.isFinite(pending.verification?.delta)) {
+        const remaining = Math.max(0, pending.intent.amount - pending.verification.delta)
+        if (remaining === 0) {
+          memory.set('tasks.pending', null)
+          await memory.save()
+          say("that stored delivery is already fully verified; there is nothing left to resume.")
+          return
+        }
+        resumeIntent = { ...pending.intent, amount: remaining }
+      }
+
       if (pending.projectId) {
         const project = memory.get(`projects.${pending.projectId}`)
         const material = project?.materials?.[pending.intent.resource.canonical]

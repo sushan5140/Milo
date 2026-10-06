@@ -13,7 +13,9 @@ import { recoverDeathItems } from './safety/recovery.js'
 import { verifyHeldGoal, verifyDepositDelta, summarizeVerification } from './agent/verifier.js'
 import { withRetries } from './safety/retry.js'
 import { createProject, addMaterial, recordProjectDelivery, nextProjectDeficit, summarizeProject, findProject, listProjects, setProjectBuildPlan, setProjectSite, addProjectNote, setDesignConstraint, suggestProjectNext } from './projects/project.js'
-import { createBuildPlan, estimateMaterials, approveBuildPlan, reviseBuildPlan, summarizeBuildPlan } from './building/plan.js'
+import { createBuildPlan, estimateMaterials, approveBuildPlan, reviseBuildPlan, summarizeBuildPlan, setBuildPalette, replacePaletteBlock } from './building/plan.js'
+import { observationsToBuildPlan } from './building/reference-adapter.js'
+import { footprintCorners } from './building/preview.js'
 
 const {
   MILO_HOST = 'localhost',
@@ -469,7 +471,107 @@ bot.on('chat', async (username, message) => {
       return
     }
 
-    if (/^(build plan|show build plan)$/.test(normalized)) {
+    const paletteMatch = normalized.match(/^build palette\s+(.+)$/)
+    if (paletteMatch) {
+      if (!activeProject?.design?.plan) {
+        say("there's no build plan yet.")
+        return
+      }
+
+      const entries = paletteMatch[1].split(',')
+        .map(part => part.trim())
+        .filter(Boolean)
+        .map(part => {
+          const [blockRaw, ratioRaw] = part.split('=').map(v => v.trim())
+          const ratio = Number(ratioRaw)
+          if (!blockRaw || !Number.isFinite(ratio) || ratio < 0) return null
+          return { block: blockRaw, ratio }
+        })
+        .filter(Boolean)
+
+      if (!entries.length) {
+        say("use: Milo build palette spruce_planks=60, stone_bricks=40")
+        return
+      }
+
+      setBuildPalette(activeProject.design.plan, entries)
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      await memory.save()
+      say(`palette updated. ${summarizeBuildPlan(activeProject.design.plan)}`)
+      return
+    }
+
+    const paletteReplaceMatch = normalized.match(/^replace palette\s+(\S+)\s+with\s+(\S+)$/)
+    if (paletteReplaceMatch) {
+      if (!activeProject?.design?.plan) {
+        say("there's no build plan yet.")
+        return
+      }
+
+      replacePaletteBlock(activeProject.design.plan, paletteReplaceMatch[1], paletteReplaceMatch[2])
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      await memory.save()
+      say(`replaced ${paletteReplaceMatch[1]} with ${paletteReplaceMatch[2]}. approval was reset because the plan changed.`)
+      return
+    }
+
+    const referenceObservationMatch = normalized.match(/^reference plan\s+(\d+)x(\d+)x(\d+)(?:\s+style\s+(.+))?$/)
+    if (referenceObservationMatch) {
+      if (!activeProject) {
+        say("start or select a project first.")
+        return
+      }
+
+      const plan = observationsToBuildPlan({
+        width: Number(referenceObservationMatch[1]),
+        length: Number(referenceObservationMatch[2]),
+        height: Number(referenceObservationMatch[3]),
+        style: referenceObservationMatch[4] || 'unspecified',
+        source: 'manual-reference-observations',
+        confidence: 1
+      })
+
+      setProjectBuildPlan(activeProject, plan)
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      memory.pushEvent('reference_plan_created', {
+        projectId: activeProject.id,
+        footprint: plan.footprint,
+        height: plan.height,
+        style: plan.style
+      })
+      await memory.save()
+      say(`reference observations converted into a draft plan: ${summarizeBuildPlan(plan)}`)
+      return
+    }
+
+    if (/^(preview footprint|walk footprint|preview build footprint)$/.test(normalized)) {
+      if (!activeProject?.design?.plan) {
+        say("there's no build plan yet.")
+        return
+      }
+      if (!activeProject.site) {
+        say("set the project site first with 'Milo project site here'.")
+        return
+      }
+      if (activeProject.site.dimension !== bot.game.dimension) {
+        say("the project site is in another dimension.")
+        return
+      }
+
+      const corners = footprintCorners(activeProject.site, activeProject.design.plan.footprint)
+      say(`walking the ${activeProject.design.plan.footprint.width}x${activeProject.design.plan.footprint.length} footprint corners. I won't place or break anything.`)
+
+      for (const corner of corners) {
+        await bot.pathfinder.goto(new goals.GoalNear(corner.x, corner.y, corner.z, 2))
+        await sleep(500)
+      }
+
+      await bot.pathfinder.goto(new goals.GoalNear(corners[0].x, corners[0].y, corners[0].z, 2))
+      say("footprint preview complete. no blocks were changed.")
+      return
+    }
+
+        if (/^(build plan|show build plan)$/.test(normalized)) {
       if (!activeProject?.design?.plan) {
         say("there's no build plan yet.")
         return

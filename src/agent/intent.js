@@ -1,23 +1,68 @@
 const RESOURCE_ALIASES = {
-  iron: { canonical: 'iron', blocks: ['iron_ore', 'deepslate_iron_ore'], drops: ['raw_iron', 'iron_ore'] },
-  coal: { canonical: 'coal', blocks: ['coal_ore', 'deepslate_coal_ore'], drops: ['coal'] },
-  diamond: { canonical: 'diamond', blocks: ['diamond_ore', 'deepslate_diamond_ore'], drops: ['diamond'] },
-  diamonds: { canonical: 'diamond', blocks: ['diamond_ore', 'deepslate_diamond_ore'], drops: ['diamond'] },
-  copper: { canonical: 'copper', blocks: ['copper_ore', 'deepslate_copper_ore'], drops: ['raw_copper'] },
-  gold: { canonical: 'gold', blocks: ['gold_ore', 'deepslate_gold_ore'], drops: ['raw_gold', 'gold_ore'] },
-  redstone: { canonical: 'redstone', blocks: ['redstone_ore', 'deepslate_redstone_ore'], drops: ['redstone'] },
-  lapis: { canonical: 'lapis', blocks: ['lapis_ore', 'deepslate_lapis_ore'], drops: ['lapis_lazuli'] },
-  emerald: { canonical: 'emerald', blocks: ['emerald_ore', 'deepslate_emerald_ore'], drops: ['emerald'] },
-  emeralds: { canonical: 'emerald', blocks: ['emerald_ore', 'deepslate_emerald_ore'], drops: ['emerald'] },
-  cobblestone: { canonical: 'cobblestone', blocks: ['stone'], drops: ['cobblestone'] },
-  stone: { canonical: 'cobblestone', blocks: ['stone'], drops: ['cobblestone'] },
-  dirt: { canonical: 'dirt', blocks: ['dirt'], drops: ['dirt'] },
-  oak: { canonical: 'oak_log', blocks: ['oak_log'], drops: ['oak_log'] },
-  'oak log': { canonical: 'oak_log', blocks: ['oak_log'], drops: ['oak_log'] },
-  'oak logs': { canonical: 'oak_log', blocks: ['oak_log'], drops: ['oak_log'] },
-  spruce: { canonical: 'spruce_log', blocks: ['spruce_log'], drops: ['spruce_log'] },
-  'spruce log': { canonical: 'spruce_log', blocks: ['spruce_log'], drops: ['spruce_log'] },
-  'spruce logs': { canonical: 'spruce_log', blocks: ['spruce_log'], drops: ['spruce_log'] }
+  iron: {
+    canonical: 'iron',
+    display: 'iron',
+    blocks: ['iron_ore', 'deepslate_iron_ore'],
+    drops: ['raw_iron', 'iron_ore'],
+    finished: ['iron_ingot'],
+    process: 'smelt'
+  },
+  'iron ingot': {
+    canonical: 'iron',
+    display: 'iron',
+    blocks: ['iron_ore', 'deepslate_iron_ore'],
+    drops: ['raw_iron', 'iron_ore'],
+    finished: ['iron_ingot'],
+    process: 'smelt'
+  },
+  'iron ingots': {
+    canonical: 'iron',
+    display: 'iron',
+    blocks: ['iron_ore', 'deepslate_iron_ore'],
+    drops: ['raw_iron', 'iron_ore'],
+    finished: ['iron_ingot'],
+    process: 'smelt'
+  },
+  'raw iron': {
+    canonical: 'raw_iron',
+    display: 'raw iron',
+    blocks: ['iron_ore', 'deepslate_iron_ore'],
+    drops: ['raw_iron', 'iron_ore']
+  },
+  coal: { canonical: 'coal', display: 'coal', blocks: ['coal_ore', 'deepslate_coal_ore'], drops: ['coal'] },
+  diamond: { canonical: 'diamond', display: 'diamond', blocks: ['diamond_ore', 'deepslate_diamond_ore'], drops: ['diamond'] },
+  diamonds: { canonical: 'diamond', display: 'diamond', blocks: ['diamond_ore', 'deepslate_diamond_ore'], drops: ['diamond'] },
+  copper: {
+    canonical: 'copper',
+    display: 'copper',
+    blocks: ['copper_ore', 'deepslate_copper_ore'],
+    drops: ['raw_copper'],
+    finished: ['copper_ingot'],
+    process: 'smelt'
+  },
+  'raw copper': { canonical: 'raw_copper', display: 'raw copper', blocks: ['copper_ore', 'deepslate_copper_ore'], drops: ['raw_copper'] },
+  gold: {
+    canonical: 'gold',
+    display: 'gold',
+    blocks: ['gold_ore', 'deepslate_gold_ore'],
+    drops: ['raw_gold', 'gold_ore'],
+    finished: ['gold_ingot'],
+    process: 'smelt'
+  },
+  'raw gold': { canonical: 'raw_gold', display: 'raw gold', blocks: ['gold_ore', 'deepslate_gold_ore'], drops: ['raw_gold', 'gold_ore'] },
+  redstone: { canonical: 'redstone', display: 'redstone', blocks: ['redstone_ore', 'deepslate_redstone_ore'], drops: ['redstone'] },
+  lapis: { canonical: 'lapis', display: 'lapis', blocks: ['lapis_ore', 'deepslate_lapis_ore'], drops: ['lapis_lazuli'] },
+  emerald: { canonical: 'emerald', display: 'emerald', blocks: ['emerald_ore', 'deepslate_emerald_ore'], drops: ['emerald'] },
+  emeralds: { canonical: 'emerald', display: 'emerald', blocks: ['emerald_ore', 'deepslate_emerald_ore'], drops: ['emerald'] },
+  cobblestone: { canonical: 'cobblestone', display: 'cobblestone', blocks: ['stone'], drops: ['cobblestone'] },
+  stone: { canonical: 'cobblestone', display: 'cobblestone', blocks: ['stone'], drops: ['cobblestone'] },
+  dirt: { canonical: 'dirt', display: 'dirt', blocks: ['dirt'], drops: ['dirt'] },
+  oak: { canonical: 'oak_log', display: 'oak logs', blocks: ['oak_log'], drops: ['oak_log'] },
+  'oak log': { canonical: 'oak_log', display: 'oak logs', blocks: ['oak_log'], drops: ['oak_log'] },
+  'oak logs': { canonical: 'oak_log', display: 'oak logs', blocks: ['oak_log'], drops: ['oak_log'] },
+  spruce: { canonical: 'spruce_log', display: 'spruce logs', blocks: ['spruce_log'], drops: ['spruce_log'] },
+  'spruce log': { canonical: 'spruce_log', display: 'spruce logs', blocks: ['spruce_log'], drops: ['spruce_log'] },
+  'spruce logs': { canonical: 'spruce_log', display: 'spruce logs', blocks: ['spruce_log'], drops: ['spruce_log'] }
 }
 
 export function parseIntent(text) {
@@ -36,5 +81,5 @@ export function parseIntent(text) {
 }
 
 export function supportedResources() {
-  return [...new Set(Object.values(RESOURCE_ALIASES).map(v => v.canonical))].sort()
+  return [...new Set(Object.values(RESOURCE_ALIASES).map(v => v.display || v.canonical))].sort()
 }

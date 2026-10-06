@@ -12,7 +12,7 @@ import { ensureTool } from './skills/crafting.js'
 import { recoverDeathItems } from './safety/recovery.js'
 import { verifyHeldGoal, verifyDepositDelta, summarizeVerification } from './agent/verifier.js'
 import { withRetries } from './safety/retry.js'
-import { createProject, addMaterial, recordProjectDelivery, nextProjectDeficit, summarizeProject, findProject } from './projects/project.js'
+import { createProject, addMaterial, recordProjectDelivery, nextProjectDeficit, summarizeProject, findProject, listProjects } from './projects/project.js'
 
 const {
   MILO_HOST = 'localhost',
@@ -408,7 +408,44 @@ bot.on('chat', async (username, message) => {
       return
     }
 
-    const projectStatusMatch = normalized.match(/^project status(?:\s+(.+))?$/)
+    if (/^(projects|list projects)$/.test(normalized)) {
+      const projects = listProjects(memory.get('projects') || {})
+      if (!projects.length) {
+        say("you don't have any projects yet.")
+        return
+      }
+
+      const activeId = memory.get('projectState.activeId')
+      const summary = projects.slice(0, 5)
+        .map(project => `${project.id === activeId ? '*' : ''}${project.name} [${project.status}]`)
+        .join(', ')
+      say(`projects: ${summary}`)
+      return
+    }
+
+    const completeProjectMatch = normalized.match(/^(?:complete|finish) project(?:\s+(.+))?$/)
+    if (completeProjectMatch) {
+      const projects = memory.get('projects') || {}
+      const explicit = completeProjectMatch[1]?.trim()
+      const activeId = memory.get('projectState.activeId')
+      const project = explicit ? findProject(projects, explicit) : (activeId ? projects[activeId] : null)
+
+      if (!project) {
+        say(explicit ? `I don't know a project called "${explicit}".` : "there's no active project to finish.")
+        return
+      }
+
+      project.status = 'complete'
+      project.updatedAt = new Date().toISOString()
+      memory.set(`projects.${project.id}`, project)
+      if (activeId === project.id) memory.set('projectState.activeId', null)
+      memory.pushEvent('project_completed', { projectId: project.id, name: project.name })
+      await memory.save()
+      say(`${project.name} marked complete.`)
+      return
+    }
+
+        const projectStatusMatch = normalized.match(/^project status(?:\s+(.+))?$/)
     if (projectStatusMatch) {
       const projects = memory.get('projects') || {}
       const explicit = projectStatusMatch[1]?.trim()

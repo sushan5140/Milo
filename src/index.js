@@ -309,7 +309,7 @@ async function runGatherTask(username, intent, options = {}) {
     if (outcome.projectId && verification) {
       const project = memory.get(`projects.${outcome.projectId}`)
       if (project) {
-        const verifiedDelivery = verification.delta ?? (verification.complete ? amount : 0)
+        const verifiedDelivery = Number.isFinite(verification.delta) ? verification.delta : 0
         if (verifiedDelivery > 0) {
           recordProjectDelivery(project, resource, verifiedDelivery)
           memory.set(`projects.${outcome.projectId}`, project)

@@ -1,4 +1,5 @@
 import { goals } from 'mineflayer-pathfinder'
+import { Vec3 } from 'vec3'
 
 export function nearestChest(bot, maxDistance = 6) {
   return bot.findBlock({
@@ -20,7 +21,7 @@ export function serializePosition(block, dimension) {
 
 export async function depositItems({ bot, storage, itemNames, count }) {
   await bot.pathfinder.goto(new goals.GoalNear(storage.x, storage.y, storage.z, 2))
-  const block = bot.blockAt({ x: storage.x, y: storage.y, z: storage.z })
+  const block = bot.blockAt(new Vec3(storage.x, storage.y, storage.z))
   if (!block || !['chest', 'trapped_chest', 'barrel'].includes(block.name)) {
     throw new Error('STORAGE_MISSING')
   }

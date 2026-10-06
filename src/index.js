@@ -87,21 +87,22 @@ function sleep(ms) {
 async function pauseActiveTask(reason = 'priority_interrupt') {
   if (!activeTask) return null
 
+  const task = activeTask
   const snapshot = {
-    id: activeTask.id,
-    intent: activeTask.intent,
-    projectId: activeTask.projectId || null,
+    id: task.id,
+    intent: task.intent,
+    projectId: task.projectId || null,
     reason,
     savedAt: new Date().toISOString()
   }
 
-  activeTask.cancelled = true
+  task.cancelled = true
   memory.set('tasks.pending', snapshot)
   memory.set('tasks.current', null)
   memory.pushEvent('task_preempted', {
-    id: activeTask.id,
-    resource: activeTask.resource,
-    amount: activeTask.amount,
+    id: task.id,
+    resource: task.resource,
+    amount: task.amount,
     reason
   })
   await memory.save()
@@ -109,7 +110,7 @@ async function pauseActiveTask(reason = 'priority_interrupt') {
   bot.pathfinder.stop()
   bot.clearControlStates()
 
-  for (let i = 0; i < 15 && activeTask; i += 1) {
+  for (let i = 0; i < 15 && activeTask === task; i += 1) {
     await sleep(100)
   }
 
@@ -162,7 +163,7 @@ function friendlyError(error) {
 async function runGatherTask(username, intent, options = {}) {
   const { amount, resource } = intent
   const taskId = options.taskId || `gather-${Date.now()}`
-  activeTask = {
+  const task = {
     id: taskId,
     type: 'gather',
     resource: resource.canonical,
@@ -170,19 +171,22 @@ async function runGatherTask(username, intent, options = {}) {
     intent,
     resumed: Boolean(options.resumed),
     projectId: options.projectId || null,
+    cancelled: false,
+    abandoned: false,
     startedAt: new Date().toISOString()
   }
+  activeTask = task
 
   memory.set('tasks.current', {
-    id: activeTask.id,
-    type: activeTask.type,
-    resource: activeTask.resource,
-    amount: activeTask.amount,
-    intent: activeTask.intent,
-    projectId: activeTask.projectId,
-    startedAt: activeTask.startedAt
+    id: task.id,
+    type: task.type,
+    resource: task.resource,
+    amount: task.amount,
+    intent: task.intent,
+    projectId: task.projectId,
+    startedAt: task.startedAt
   })
-  memory.pushEvent(options.resumed ? 'task_resumed' : 'task_started', activeTask)
+  memory.pushEvent(options.resumed ? 'task_resumed' : 'task_started', task)
   await memory.save()
 
   say(`got it. going for ${amount} ${resource.canonical.replaceAll('_', ' ')}.`)
@@ -203,7 +207,7 @@ async function runGatherTask(username, intent, options = {}) {
           resource,
           amount,
           onProgress: message => say(message),
-          shouldCancel: () => Boolean(activeTask?.cancelled)
+          shouldCancel: () => Boolean(task.cancelled)
         }),
         {
           attempts: 2,
@@ -212,7 +216,7 @@ async function runGatherTask(username, intent, options = {}) {
       )
 
       if (result.complete) break
-      if (activeTask?.cancelled) throw new Error('TASK_CANCELLED')
+      if (task.cancelled) throw new Error('TASK_CANCELLED')
       if (planAttempt < 2) say(`I only got to ${result.total}. replanning once before I give up.`)
     }
 
@@ -220,11 +224,14 @@ async function runGatherTask(username, intent, options = {}) {
       say(`I only got to ${result.total}. I couldn't verify the full amount nearby.`)
     }
 
+    if (task.cancelled) throw new Error('TASK_CANCELLED')
+
     const home = memory.get('places.home')
     if (home) {
       say('heading back.')
       await goHome()
     }
+    if (task.cancelled) throw new Error('TASK_CANCELLED')
 
     let deliveryNames = resource.drops
     let deliveryCount = result.total
@@ -250,6 +257,7 @@ async function runGatherTask(username, intent, options = {}) {
       deliveryNames = resource.finished
       deliveryCount = smelt.produced
     }
+    if (task.cancelled) throw new Error('TASK_CANCELLED')
 
     const storage = memory.get('storage.default')
     let deposited = 0
@@ -282,6 +290,7 @@ async function runGatherTask(username, intent, options = {}) {
     } else {
       verification = verifyHeldGoal(bot, deliveryNames, amount)
     }
+    if (task.cancelled) throw new Error('TASK_CANCELLED')
 
     const outcome = {
       id: taskId,
@@ -293,7 +302,7 @@ async function runGatherTask(username, intent, options = {}) {
       deposited,
       complete: Boolean(verification?.complete),
       verification,
-      projectId: activeTask?.projectId || options.projectId || null,
+      projectId: task.projectId || options.projectId || null,
       finishedAt: new Date().toISOString()
     }
 
@@ -323,7 +332,7 @@ async function runGatherTask(username, intent, options = {}) {
         intent,
         reason: 'verification_failed',
         verification,
-        projectId: activeTask?.projectId || options.projectId || null,
+        projectId: task.projectId || options.projectId || null,
         savedAt: new Date().toISOString()
       })
       memory.set('tasks.current', null)
@@ -342,26 +351,42 @@ async function runGatherTask(username, intent, options = {}) {
     }
   } catch (error) {
     const reason = String(error?.message || error)
-    memory.set('tasks.current', null)
-    memory.set('tasks.pending', {
-      id: taskId,
-      intent,
-      projectId: activeTask?.projectId || options.projectId || null,
-      reason,
-      savedAt: new Date().toISOString()
-    })
-    memory.pushEvent(reason === 'TASK_CANCELLED' ? 'task_paused' : 'task_failed', {
-      id: taskId,
-      resource: resource.canonical,
-      amount,
-      error: reason
-    })
-    await memory.save()
-    console.error('[Milo] Gather task failed:', error)
-    say(friendlyError(error))
-    if (reason === 'TASK_CANCELLED') say("I saved the task. say 'Milo resume' whenever you want me to continue.")
+    const stillOwner = activeTask === task
+
+    if (task.abandoned) {
+      if (stillOwner) memory.set('tasks.current', null)
+      memory.pushEvent('task_abandoned', {
+        id: taskId,
+        resource: resource.canonical,
+        amount,
+        reason
+      })
+      await memory.save()
+      return
+    }
+
+    if (stillOwner) {
+      memory.set('tasks.current', null)
+      memory.set('tasks.pending', {
+        id: taskId,
+        intent,
+        projectId: task.projectId || options.projectId || null,
+        reason,
+        savedAt: new Date().toISOString()
+      })
+      memory.pushEvent(reason === 'TASK_CANCELLED' ? 'task_paused' : 'task_failed', {
+        id: taskId,
+        resource: resource.canonical,
+        amount,
+        error: reason
+      })
+      await memory.save()
+      console.error('[Milo] Gather task failed:', error)
+      say(friendlyError(error))
+      if (reason === 'TASK_CANCELLED') say("I saved the task. say 'Milo resume' whenever you want me to continue.")
+    }
   } finally {
-    activeTask = null
+    if (activeTask === task) activeTask = null
   }
 }
 
@@ -1142,11 +1167,13 @@ bot.on('chat', async (username, message) => {
       }
 
       if (activeTask) {
-        activeTask.cancelled = true
+        const previousTask = activeTask
+        previousTask.cancelled = true
+        previousTask.abandoned = true
         bot.pathfinder.stop()
         bot.clearControlStates()
 
-        for (let i = 0; i < 20 && activeTask; i += 1) {
+        for (let i = 0; i < 20 && activeTask === previousTask; i += 1) {
           await sleep(100)
         }
       }

@@ -50,17 +50,17 @@
 - [~] Collaborative task suggestions — next-material bottleneck selection implemented
 
 ## M5 — Image-to-Build
-- [ ] reference-image interpretation
-- [ ] block-palette proposal
-- [ ] footprint preview
-- [ ] materials plan
-- [ ] build executor
-- [ ] visual/world-state verification
+- [~] reference-image interpretation — project reference/design memory exists; actual image analysis pending
+- [~] block-palette proposal — plan schema supports weighted palettes; image-derived palette pending
+- [x] footprint/height planning model with revision + approval
+- [x] deterministic planning-stage material estimate
+- [ ] build executor — intentionally locked pending live-world verification
+- [ ] visual/world-state verification — pending
 
 
 ## Next implementation batch
-1. Add richer project goals and stages beyond materials: planning, site, build, verify.
-2. Add project notes/decisions so Milo remembers design constraints and player preferences per project.
-3. Add smarter collaborative suggestions based on project bottlenecks and current inventory/world context.
-4. Start M5 reference-image -> build-plan data structures without executing destructive building yet.
-5. Keep live-world M0-M3 smoke testing as a parallel integration track.
+1. Add build palette editing and palette-to-resource translation.
+2. Add reference-image analysis adapter that converts image observations into the existing build-plan schema.
+3. Add footprint/outline preview in-world without placing permanent structure blocks.
+4. Add section/layer generation for walls, roof, openings and decorative regions.
+5. Keep automatic construction locked until live-world M0-M3 integration testing passes.

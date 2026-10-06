@@ -2,6 +2,7 @@ import { goals } from 'mineflayer-pathfinder'
 import { countItems, survivalCheck, toolClassFor, hasToolClass } from '../world/inventory.js'
 import { ensureTool } from './crafting.js'
 import { ensureFed } from '../safety/survival.js'
+import { immediateEnvironmentRisk } from '../safety/danger.js'
 
 const TOOL_RANK = ['netherite', 'diamond', 'iron', 'stone', 'golden', 'wooden']
 
@@ -20,6 +21,27 @@ async function equipBestTool(bot, toolClass) {
       return tool
     }
   }
+  return null
+}
+
+function posKey(position) {
+  return `${position.x},${position.y},${position.z}`
+}
+
+function findCandidate(bot, matching, blacklist) {
+  const blocks = bot.findBlocks({
+    matching,
+    maxDistance: 96,
+    count: 32
+  })
+
+  for (const position of blocks) {
+    if (blacklist.has(posKey(position))) continue
+    const block = bot.blockAt(position)
+    if (!block || block.name === 'air') continue
+    return block
+  }
+
   return null
 }
 
@@ -78,6 +100,7 @@ export async function gatherResource({
   let mined = 0
   let hazardousBlocksSkipped = 0
   let searchStep = 0
+  const blacklist = new Set()
   const searchOffsets = [
     [16, 0], [0, 16], [-16, 0], [0, -16],
     [24, 24], [-24, 24], [-24, -24], [24, -24]
@@ -99,11 +122,18 @@ export async function gatherResource({
       if (tool.crafted) onProgress(`my ${toolClass} was gone or invalid, so I replaced it with a ${tool.tool.replaceAll('_', ' ')}.`)
     }
 
-    const block = bot.findBlock({
-      matching,
-      maxDistance: 96,
-      count: 1
-    })
+    const risk = immediateEnvironmentRisk(bot)
+    if (risk) {
+      if (risk.code === 'HOSTILE_NEARBY') {
+        onProgress(`there's a ${risk.detail} too close. I'm backing off before continuing.`)
+        const p = bot.entity.position
+        await bot.pathfinder.goto(new goals.GoalNear(p.x + 10, p.y, p.z + 10, 2))
+      } else {
+        throw new Error(risk.code)
+      }
+    }
+
+    const block = findCandidate(bot, matching, blacklist)
 
     if (!block) {
       noBlockAttempts += 1
@@ -120,7 +150,8 @@ export async function gatherResource({
     if (hazard) {
       hazardousBlocksSkipped += 1
       onProgress(`there's ${hazard.replaceAll('_', ' ')} right beside this block, so I'm leaving it.`)
-      if (hazardousBlocksSkipped >= 3) break
+      blacklist.add(posKey(block.position))
+      if (hazardousBlocksSkipped >= 6) break
       const [dx, dz] = searchOffsets[searchStep % searchOffsets.length]
       searchStep += 1
       const p = bot.entity.position
@@ -129,7 +160,13 @@ export async function gatherResource({
     }
 
     noBlockAttempts = 0
-    await bot.pathfinder.goto(new goals.GoalNear(block.position.x, block.position.y, block.position.z, 1))
+    try {
+      await bot.pathfinder.goto(new goals.GoalNear(block.position.x, block.position.y, block.position.z, 1))
+    } catch (error) {
+      blacklist.add(posKey(block.position))
+      onProgress("that target looks unreachable. trying a different one.")
+      continue
+    }
     if (shouldCancel()) throw new Error('TASK_CANCELLED')
 
     const freshBlock = bot.blockAt(block.position)

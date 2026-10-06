@@ -12,7 +12,8 @@ import { ensureTool } from './skills/crafting.js'
 import { recoverDeathItems } from './safety/recovery.js'
 import { verifyHeldGoal, verifyDepositDelta, summarizeVerification } from './agent/verifier.js'
 import { withRetries } from './safety/retry.js'
-import { createProject, addMaterial, recordProjectDelivery, nextProjectDeficit, summarizeProject, findProject, listProjects } from './projects/project.js'
+import { createProject, addMaterial, recordProjectDelivery, nextProjectDeficit, summarizeProject, findProject, listProjects, setProjectBuildPlan, setProjectSite, addProjectNote, setDesignConstraint, suggestProjectNext } from './projects/project.js'
+import { createBuildPlan, estimateMaterials, approveBuildPlan, reviseBuildPlan, summarizeBuildPlan } from './building/plan.js'
 
 const {
   MILO_HOST = 'localhost',
@@ -380,7 +381,117 @@ bot.on('chat', async (username, message) => {
       return
     }
 
-    const projectNeedsMatch = normalized.match(/^project needs\s+(\d+)\s+(.+)$/)
+    const activeProjectId = memory.get('projectState.activeId')
+    const activeProject = activeProjectId ? memory.get(`projects.${activeProjectId}`) : null
+
+    const projectNoteMatch = normalized.match(/^project note\s+(.+)$/)
+    if (projectNoteMatch) {
+      if (!activeProject) {
+        say("there's no active project.")
+        return
+      }
+      addProjectNote(activeProject, projectNoteMatch[1])
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      await memory.save()
+      say("saved that project note.")
+      return
+    }
+
+    const projectConstraintMatch = normalized.match(/^project constraint\s+(.+)$/)
+    if (projectConstraintMatch) {
+      if (!activeProject) {
+        say("there's no active project.")
+        return
+      }
+      setDesignConstraint(activeProject, projectConstraintMatch[1])
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      await memory.save()
+      say("saved that design constraint.")
+      return
+    }
+
+    if (/^project site here$/.test(normalized)) {
+      if (!activeProject) {
+        say("there's no active project.")
+        return
+      }
+      setProjectSite(activeProject, bot.entity.position, bot.game.dimension)
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      await memory.save()
+      say(`saved this as the site for ${activeProject.name}: ${posLabel(bot.entity.position)}.`)
+      return
+    }
+
+    if (/^(project next|what next for project|project suggestion)$/.test(normalized)) {
+      if (!activeProject) {
+        say("there's no active project.")
+        return
+      }
+      say(suggestProjectNext(activeProject))
+      return
+    }
+
+    const buildPlanMatch = normalized.match(/^plan build\s+(\d+)x(\d+)x(\d+)(?:\s+style\s+(.+))?$/)
+    if (buildPlanMatch) {
+      if (!activeProject) {
+        say("start or select a project first.")
+        return
+      }
+
+      const width = Number(buildPlanMatch[1])
+      const length = Number(buildPlanMatch[2])
+      const height = Number(buildPlanMatch[3])
+      const style = buildPlanMatch[4] || activeProject.design?.style || 'unspecified'
+
+      const plan = createBuildPlan({ width, length, height, style })
+      estimateMaterials(plan)
+      setProjectBuildPlan(activeProject, plan)
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      memory.pushEvent('build_plan_created', { projectId: activeProject.id, width, length, height, style })
+      await memory.save()
+      say(`draft build plan created for ${activeProject.name}: ${summarizeBuildPlan(plan)}. nothing will be built until the plan is approved.`)
+      return
+    }
+
+    const reviseBuildMatch = normalized.match(/^revise build\s+(width|length|height)\s+(\d+)$/)
+    if (reviseBuildMatch) {
+      if (!activeProject?.design?.plan) {
+        say("there's no build plan to revise.")
+        return
+      }
+      const field = reviseBuildMatch[1]
+      const value = Number(reviseBuildMatch[2])
+      reviseBuildPlan(activeProject.design.plan, { [field]: value })
+      estimateMaterials(activeProject.design.plan)
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      await memory.save()
+      say(`updated. ${summarizeBuildPlan(activeProject.design.plan)}`)
+      return
+    }
+
+    if (/^(build plan|show build plan)$/.test(normalized)) {
+      if (!activeProject?.design?.plan) {
+        say("there's no build plan yet.")
+        return
+      }
+      say(summarizeBuildPlan(activeProject.design.plan))
+      return
+    }
+
+    if (/^approve build plan$/.test(normalized)) {
+      if (!activeProject?.design?.plan) {
+        say("there's no build plan to approve.")
+        return
+      }
+      approveBuildPlan(activeProject.design.plan)
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      memory.pushEvent('build_plan_approved', { projectId: activeProject.id })
+      await memory.save()
+      say("build plan approved. automatic construction is still locked until live-world verification is complete.")
+      return
+    }
+
+        const projectNeedsMatch = normalized.match(/^project needs\s+(\d+)\s+(.+)$/)
     if (projectNeedsMatch) {
       const activeId = memory.get('projectState.activeId')
       const project = activeId ? memory.get(`projects.${activeId}`) : null

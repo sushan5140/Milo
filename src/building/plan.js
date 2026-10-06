@@ -124,3 +124,31 @@ export function summarizeBuildPlan(plan) {
     plan.approved ? 'approved' : 'draft'
   ].join(' | ')
 }
+
+
+export function setBuildPalette(plan, palette) {
+  if (!Array.isArray(palette) || palette.length === 0) throw new Error('INVALID_PALETTE')
+  plan.palette = palette.map(entry => ({
+    block: String(entry.block),
+    role: entry.role || 'general',
+    ratio: Number(entry.ratio ?? 0)
+  }))
+  plan.approved = false
+  plan.status = 'draft'
+  delete plan.approvedAt
+  estimateMaterials(plan)
+  plan.updatedAt = new Date().toISOString()
+  return plan
+}
+
+export function replacePaletteBlock(plan, fromBlock, toBlock) {
+  const item = plan.palette.find(entry => entry.block === fromBlock)
+  if (!item) throw new Error('PALETTE_BLOCK_NOT_FOUND')
+  item.block = toBlock
+  plan.approved = false
+  plan.status = 'draft'
+  delete plan.approvedAt
+  estimateMaterials(plan)
+  plan.updatedAt = new Date().toISOString()
+  return plan
+}

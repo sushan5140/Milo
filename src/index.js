@@ -16,6 +16,10 @@ import { createProject, addMaterial, recordProjectDelivery, nextProjectDeficit, 
 import { createBuildPlan, estimateMaterials, approveBuildPlan, reviseBuildPlan, summarizeBuildPlan, setBuildPalette, replacePaletteBlock } from './building/plan.js'
 import { observationsToBuildPlan } from './building/reference-adapter.js'
 import { footprintCorners } from './building/preview.js'
+import { createImageReference, analyzeReferenceImage } from './building/image-ingest.js'
+import { createHttpVisionAnalyzer } from './building/http-vision.js'
+import { syncPlanMaterialsToProject } from './building/material-sync.js'
+import { verifyPlanAgainstWorld, summarizeWorldVerification } from './building/world-verifier.js'
 
 const {
   MILO_HOST = 'localhost',
@@ -24,7 +28,10 @@ const {
   MILO_VERSION = '',
   MILO_AUTH = 'offline',
   MILO_OWNER = '',
-  MILO_MEMORY_FILE = './data/memory.json'
+  MILO_MEMORY_FILE = './data/memory.json',
+  MILO_VISION_ENDPOINT = '',
+  MILO_VISION_API_KEY = '',
+  MILO_VISION_MODEL = ''
 } = process.env
 
 const bot = mineflayer.createBot({
@@ -43,6 +50,9 @@ await memory.load()
 let owner = MILO_OWNER || memory.get('owner.username') || ''
 let mcData = null
 let activeTask = null
+const visionAnalyzer = MILO_VISION_ENDPOINT
+  ? createHttpVisionAnalyzer({ endpoint: MILO_VISION_ENDPOINT, apiKey: MILO_VISION_API_KEY || null, model: MILO_VISION_MODEL || null })
+  : null
 
 function say(message) {
   bot.chat(message)
@@ -471,7 +481,113 @@ bot.on('chat', async (username, message) => {
       return
     }
 
-    const paletteMatch = normalized.match(/^build palette\s+(.+)$/)
+    const imageReferenceMatch = rawIntent.match(/^image reference\s+(https?:\/\/\S+)$/i)
+    if (imageReferenceMatch) {
+      if (!activeProject) {
+        say("start or select a project first.")
+        return
+      }
+
+      const reference = createImageReference({
+        source: imageReferenceMatch[1],
+        kind: 'url',
+        metadata: { addedBy: username }
+      })
+
+      activeProject.design ??= {}
+      activeProject.design.reference = reference
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      memory.pushEvent('project_image_reference_added', {
+        projectId: activeProject.id,
+        source: reference.source
+      })
+      await memory.save()
+      say("saved the reference image URL for this project.")
+      return
+    }
+
+    if (/^analyze reference$/.test(normalized)) {
+      if (!activeProject?.design?.reference) {
+        say("there's no image reference saved for this project.")
+        return
+      }
+      if (!visionAnalyzer) {
+        say("the image reference is saved, but no vision analyzer endpoint is configured yet.")
+        return
+      }
+
+      say("analyzing the saved build reference.")
+      const observations = await analyzeReferenceImage(activeProject.design.reference, visionAnalyzer)
+      const plan = observationsToBuildPlan(observations)
+      setProjectBuildPlan(activeProject, plan)
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      memory.pushEvent('project_reference_analyzed', {
+        projectId: activeProject.id,
+        style: plan.style,
+        footprint: plan.footprint,
+        height: plan.height,
+        confidence: plan.reference?.confidence ?? null
+      })
+      await memory.save()
+      say(`reference analyzed into a draft plan: ${summarizeBuildPlan(plan)}`)
+      return
+    }
+
+    if (/^(sync build materials|sync plan materials)$/.test(normalized)) {
+      if (!activeProject?.design?.plan) {
+        say("there's no build plan to sync.")
+        return
+      }
+
+      const result = syncPlanMaterialsToProject(activeProject, activeProject.design.plan, parseIntent)
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      memory.pushEvent('build_materials_synced', {
+        projectId: activeProject.id,
+        resourceLines: result.bill.length,
+        unresolved: result.unresolved
+      })
+      await memory.save()
+
+      const unresolved = result.unresolved.length
+      say(`synced the build plan into ${result.bill.length} resource lines${unresolved ? `; ${unresolved} block types still need crafting/resource mappings` : ''}.`)
+      return
+    }
+
+    if (/^(verify build|verify build plan against world)$/.test(normalized)) {
+      if (!activeProject?.design?.plan) {
+        say("there's no build plan to verify.")
+        return
+      }
+      if (!activeProject.site) {
+        say("set the project site first.")
+        return
+      }
+      if (activeProject.site.dimension !== bot.game.dimension) {
+        say("the project site is in another dimension.")
+        return
+      }
+
+      const result = verifyPlanAgainstWorld(bot, activeProject.design.plan, activeProject.site, { sampleLimit: 512 })
+      activeProject.design.lastVerification = {
+        checked: result.checked,
+        matches: result.matches,
+        mismatchCount: result.mismatches.length,
+        matchRate: result.matchRate,
+        at: new Date().toISOString()
+      }
+      memory.set(`projects.${activeProject.id}`, activeProject)
+      memory.pushEvent('build_world_verified', {
+        projectId: activeProject.id,
+        checked: result.checked,
+        matches: result.matches,
+        mismatchCount: result.mismatches.length
+      })
+      await memory.save()
+      say(`${summarizeWorldVerification(result)} This check was read-only.`)
+      return
+    }
+
+        const paletteMatch = normalized.match(/^build palette\s+(.+)$/)
     if (paletteMatch) {
       if (!activeProject?.design?.plan) {
         say("there's no build plan yet.")

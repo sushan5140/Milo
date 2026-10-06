@@ -9,6 +9,7 @@ import { gatherResource } from './skills/gathering.js'
 import { nearestChest, serializePosition, depositItems } from './skills/storage.js'
 import { smeltResource } from './skills/smelting.js'
 import { ensureTool } from './skills/crafting.js'
+import { recoverDeathItems } from './safety/recovery.js'
 
 const {
   MILO_HOST = 'localhost',
@@ -84,6 +85,10 @@ function friendlyError(error) {
   if (message === 'FUEL_MISSING') return "I found a furnace, but I don't have coal or charcoal to smelt this yet."
   if (message === 'FURNACE_BUSY') return "the nearby furnace is busy with something else, so I left it alone."
   if (message === 'SMELT_TIMEOUT') return "the furnace didn't finish normally, so I stopped instead of assuming it worked."
+  if (message === 'TASK_CANCELLED') return "stopped. I won't continue that task."
+  if (message === 'NO_DEATH_MEMORY') return "I don't have a recent death location to recover from."
+  if (message === 'DEATH_MEMORY_STALE') return "that death was too long ago for me to treat the dropped items as recoverable."
+  if (message === 'DEATH_OTHER_DIMENSION') return "my last death was in another dimension; cross-dimension recovery isn't safe yet."
   if (message.startsWith('CANNOT_DIG:')) return `I reached it, but I can't safely dig ${message.split(':')[1]}.`
   return "that task broke somewhere, so I stopped instead of guessing."
 }
@@ -110,7 +115,8 @@ async function runGatherTask(username, intent) {
       mcData,
       resource,
       amount,
-      onProgress: message => say(message)
+      onProgress: message => say(message),
+      shouldCancel: () => Boolean(activeTask?.cancelled)
     })
 
     if (!result.complete) {
@@ -218,6 +224,33 @@ bot.on('chat', async (username, message) => {
   const normalized = rawIntent.toLowerCase()
 
   try {
+    if (/^(stop|cancel|stop task|cancel task)$/.test(normalized)) {
+      if (!activeTask) {
+        say("I'm not doing anything right now.")
+        return
+      }
+      activeTask.cancelled = true
+      bot.pathfinder.stop()
+      bot.clearControlStates()
+      say("stopping.")
+      return
+    }
+
+    if (/^(recover|recover items|recover my items|get my items|death recovery)$/.test(normalized)) {
+      if (activeTask) {
+        say("I'm already working on something. stop that task first.")
+        return
+      }
+
+      const death = memory.get('recovery.lastDeath')
+      say("going back to my last death spot to look for dropped items.")
+      const result = await recoverDeathItems({ bot, death })
+      memory.pushEvent('death_recovery_attempted', { death, approached: result.approached })
+      await memory.save()
+      say(result.approached > 0 ? "I swept the nearby drops. check my inventory." : "I reached the spot, but I couldn't find dropped items nearby.")
+      return
+    }
+
     if (/^(come|come here|follow me)$/.test(normalized)) {
       if (activeTask) {
         say("I'm in the middle of a task. cancellation/interruption comes in the recovery phase.")
@@ -324,6 +357,37 @@ bot.on('chat', async (username, message) => {
   } catch (error) {
     console.error('[Milo] Action failed:', error)
     say(friendlyError(error))
+  }
+})
+
+bot.on('death', async () => {
+  const p = bot.entity?.position
+  if (!p) return
+
+  const death = {
+    x: Math.floor(p.x),
+    y: Math.floor(p.y),
+    z: Math.floor(p.z),
+    dimension: bot.game?.dimension,
+    at: new Date().toISOString()
+  }
+
+  memory.set('recovery.lastDeath', death)
+  memory.pushEvent('death', death)
+
+  if (activeTask) {
+    activeTask.cancelled = true
+    memory.pushEvent('task_interrupted_by_death', {
+      id: activeTask.id,
+      resource: activeTask.resource,
+      amount: activeTask.amount
+    })
+  }
+
+  try {
+    await memory.save()
+  } catch (error) {
+    console.error('[Milo] Failed to save death memory:', error)
   }
 })
 

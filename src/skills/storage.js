@@ -21,6 +21,24 @@ export function serializePosition(block, dimension) {
   }
 }
 
+export async function countStoredItems({ bot, storage, itemNames }) {
+  await bot.pathfinder.goto(new goals.GoalNear(storage.x, storage.y, storage.z, 2))
+  const block = bot.blockAt(new Vec3(storage.x, storage.y, storage.z))
+  if (!block || !['chest', 'trapped_chest', 'barrel'].includes(block.name)) {
+    throw new Error('STORAGE_MISSING')
+  }
+
+  const container = await bot.openContainer(block)
+  try {
+    const wanted = new Set(itemNames)
+    return container.containerItems()
+      .filter(item => wanted.has(item.name))
+      .reduce((sum, item) => sum + item.count, 0)
+  } finally {
+    container.close()
+  }
+}
+
 export async function depositItems({ bot, storage, itemNames, count }) {
   await bot.pathfinder.goto(new goals.GoalNear(storage.x, storage.y, storage.z, 2))
   const block = bot.blockAt(new Vec3(storage.x, storage.y, storage.z))

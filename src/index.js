@@ -2,6 +2,7 @@ import 'dotenv/config'
 import mineflayer from 'mineflayer'
 import minecraftData from 'minecraft-data'
 import { pathfinder, Movements, goals } from 'mineflayer-pathfinder'
+import vec3 from 'vec3'
 import { MemoryStore } from './memory.js'
 import { parseIntent, supportedResources } from './agent/intent.js'
 import { inventorySummary, toolClassFor } from './world/inventory.js'
@@ -46,6 +47,8 @@ const bot = mineflayer.createBot({
 })
 
 bot.loadPlugin(pathfinder)
+
+const { Vec3 } = vec3
 
 const memory = new MemoryStore(MILO_MEMORY_FILE)
 await memory.load()
@@ -653,7 +656,7 @@ bot.on('chat', async (username, message) => {
       }
 
       const positions = expected.slice(0, 2048).map(item => {
-        const block = bot.blockAt(new (bot.entity.position.constructor)(item.x, item.y, item.z))
+        const block = bot.blockAt(new Vec3(item.x, item.y, item.z))
         return {
           x: item.x, y: item.y, z: item.z,
           before: block ? { name: block.name, stateId: block.stateId ?? null } : null

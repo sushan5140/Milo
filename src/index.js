@@ -67,6 +67,7 @@ async function pauseActiveTask(reason = 'priority_interrupt') {
   const snapshot = {
     id: activeTask.id,
     intent: activeTask.intent,
+    projectId: activeTask.projectId || null,
     reason,
     savedAt: new Date().toISOString()
   }
@@ -322,6 +323,7 @@ async function runGatherTask(username, intent, options = {}) {
     memory.set('tasks.pending', {
       id: taskId,
       intent,
+      projectId: activeTask?.projectId || options.projectId || null,
       reason,
       savedAt: new Date().toISOString()
     })
@@ -517,8 +519,29 @@ bot.on('chat', async (username, message) => {
         return
       }
 
-      say(`resuming the ${pending.intent.amount} ${pending.intent.resource.display || pending.intent.resource.canonical} task.`)
-      void runGatherTask(username, pending.intent, { taskId: pending.id, resumed: true })
+      let resumeIntent = pending.intent
+
+      if (pending.projectId) {
+        const project = memory.get(`projects.${pending.projectId}`)
+        const material = project?.materials?.[pending.intent.resource.canonical]
+        if (project && material) {
+          const missing = Math.max(0, material.target - material.delivered)
+          if (missing === 0) {
+            memory.set('tasks.pending', null)
+            await memory.save()
+            say(`${project.name} already has enough ${material.display}; there is nothing left to resume for that material.`)
+            return
+          }
+          resumeIntent = { ...pending.intent, amount: missing }
+        }
+      }
+
+      say(`resuming the ${resumeIntent.amount} ${resumeIntent.resource.display || resumeIntent.resource.canonical} task.`)
+      void runGatherTask(username, resumeIntent, {
+        taskId: pending.id,
+        resumed: true,
+        projectId: pending.projectId || null
+      })
       return
     }
 
@@ -694,6 +717,7 @@ bot.on('death', async () => {
     memory.set('tasks.pending', {
       id: activeTask.id,
       intent: activeTask.intent,
+      projectId: activeTask.projectId || null,
       reason: 'death',
       savedAt: new Date().toISOString()
     })

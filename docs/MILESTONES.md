@@ -59,10 +59,10 @@
 
 
 ## Next implementation batch
-1. Build a dry-run executor that simulates section placement without modifying the world.
-2. Add conflict detection for protected zones, occupied blocks and unsupported placements.
-3. Add exact orientation/state generation for stairs, doors and slabs across all structure sections.
-4. Add rollback-preview and section-by-section execution manifests.
+1. Add richer exact block-state generation for doors, slabs and stair variants across all generated sections.
+2. Add terrain/site preflight: uneven ground, liquids, clearance, nearby entities and support planning.
+3. Add rollback preview/diff reports that compare snapshot metadata against a proposed execution manifest.
+4. Add inventory/crafting readiness checks for each dry-run section.
 5. Run the live-world M0-M3 smoke test before any permanent placement can be enabled.
 
 
@@ -75,4 +75,6 @@
 - [x] Rollback snapshot metadata
 - [x] Executor gate defaults to disabled
 - [ ] Permanent block placement — intentionally disabled
+- [x] Read-only dry-run executor with conflict classification
+- [x] Section execution manifests with zero world mutation
 - [ ] Live-world validation before any executor enablement

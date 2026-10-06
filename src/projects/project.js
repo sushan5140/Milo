@@ -13,6 +13,7 @@ export function addMaterial(project,resource,amount) {
   const m=project.materials[key] || {canonical:key,display:resource.display||key.replaceAll('_',' '),target:0,delivered:0,resource}
   m.target+=amount; m.resource=resource; project.materials[key]=m
   if(project.stage==='planning') project.stage='materials'
+  if(project.status==='materials_ready' && m.delivered < m.target) project.status='active'
   project.updatedAt=now(); return project
 }
 export function recordProjectDelivery(project,resource,amount) {

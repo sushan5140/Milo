@@ -1,3 +1,4 @@
+import { expandCraftDependencies } from './fidelity.js'
 const DIRECT_RESOURCE = {
   cobblestone: 'cobblestone',
   dirt: 'dirt',
@@ -24,8 +25,9 @@ function baseResourceForBlock(block) {
 export function planToResourceBill(plan, parseIntent) {
   const bill = []
   const unresolved = []
+  const expanded = expandCraftDependencies(plan.materials || {})
 
-  for (const [block, count] of Object.entries(plan.materials || {})) {
+  for (const [block, count] of Object.entries(expanded.raw)) {
     if (!count) continue
     const resourceName = baseResourceForBlock(block)
     if (!resourceName) {
@@ -47,11 +49,11 @@ export function planToResourceBill(plan, parseIntent) {
     })
   }
 
-  return { bill, unresolved }
+  return { bill, unresolved: [...expanded.unresolved, ...unresolved], crafted: expanded.crafted, raw: expanded.raw }
 }
 
 export function syncPlanMaterialsToProject(project, plan, parseIntent) {
-  const { bill, unresolved } = planToResourceBill(plan, parseIntent)
+  const { bill, unresolved, crafted, raw } = planToResourceBill(plan, parseIntent)
 
   project.materials = {}
   for (const item of bill) {
@@ -72,7 +74,9 @@ export function syncPlanMaterialsToProject(project, plan, parseIntent) {
 
   project.design ??= {}
   project.design.unresolvedMaterials = unresolved
+  project.design.craftedMaterialTargets = crafted
+  project.design.rawMaterialTargets = raw
   project.updatedAt = new Date().toISOString()
 
-  return { bill, unresolved }
+  return { bill, unresolved, crafted, raw }
 }

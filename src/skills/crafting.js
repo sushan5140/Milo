@@ -84,7 +84,8 @@ function candidateMaterials(bot, toolClass, resource) {
   const min = toolRank(requiredTier(resource))
   const available = []
 
-  for (const material of ['diamond', 'iron', 'stone', 'golden', 'wooden']) {
+  // Prefer the cheapest adequate material; never spend diamonds when stone or iron suffices.
+  for (const material of ['wooden', 'stone', 'iron', 'diamond']) {
     if (toolRank(material) < min) continue
 
     const ingredient = material === 'stone'

@@ -2,6 +2,7 @@ import { goals } from 'mineflayer-pathfinder'
 import { countItems, survivalCheck, toolClassFor, hasToolClass } from '../world/inventory.js'
 import { ensureTool } from './crafting.js'
 import { ensureFed } from '../safety/survival.js'
+import { collectNearbyDrops } from './pickup.js'
 import { immediateEnvironmentRisk } from '../safety/danger.js'
 
 const TOOL_RANK = ['netherite', 'diamond', 'iron', 'stone', 'golden', 'wooden']
@@ -180,8 +181,22 @@ export async function gatherResource({
     if (!freshBlock || freshBlock.name === 'air') continue
     if (!bot.canDigBlock(freshBlock)) throw new Error(`CANNOT_DIG:${freshBlock.name}`)
 
+    const beforeDig = countItems(bot, resource.drops)
     await bot.dig(freshBlock, true)
     mined += 1
+
+    if (countItems(bot, resource.drops) < amount) {
+      const pickup = await collectNearbyDrops({
+        bot,
+        itemNames: resource.drops,
+        origin: freshBlock.position,
+        targetCount: amount,
+        shouldCancel
+      })
+      if (pickup.collected <= beforeDig) {
+        onProgress("I mined a block but couldn't verify picking up its drops; searching again.")
+      }
+    }
   }
 
   const total = countItems(bot, resource.drops)

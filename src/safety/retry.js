@@ -1,6 +1,5 @@
 const RETRYABLE = new Set([
   'FURNACE_BUSY',
-  'SMELT_TIMEOUT',
   'STORAGE_MISSING',
   'NoPath',
   'PathStopped'

@@ -12,6 +12,12 @@ const FUEL_VALUES = {
   dried_kelp_block: 20
 }
 
+// Refuse to take ownership of pre-existing furnace contents. After an uncertain
+// timeout, the next attempt must not insert the same ore again.
+export function assertEmptySmeltingSlots(furnace) {
+  if (furnace.inputItem() || furnace.outputItem()) throw new Error('FURNACE_BUSY')
+}
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
@@ -104,11 +110,7 @@ export async function smeltResource({ bot, mcData, inputNames, outputName, amoun
     const furnace = await bot.openFurnace(furnaceBlock)
 
     try {
-      const existingInput = furnace.inputItem()
-      const existingOutput = furnace.outputItem()
-
-      if (existingInput && !inputNames.includes(existingInput.name)) throw new Error('FURNACE_BUSY')
-      if (existingOutput && existingOutput.name !== outputName) throw new Error('FURNACE_BUSY')
+      assertEmptySmeltingSlots(furnace)
 
       await furnace.putInput(input.type, input.metadata ?? null, batch)
 
@@ -122,11 +124,10 @@ export async function smeltResource({ bot, mcData, inputNames, outputName, amoun
         )
       }
 
-      const priorOutput = existingOutput?.name === outputName ? existingOutput.count : 0
-      await waitForOutput(furnace, outputName, priorOutput + batch, (batch * 12000) + 15000)
+      await waitForOutput(furnace, outputName, batch, (batch * 12000) + 15000)
 
       const output = await furnace.takeOutput()
-      if (output?.name !== outputName) throw new Error('SMELT_OUTPUT_MISMATCH')
+      if (output?.name !== outputName || output.count !== batch) throw new Error('SMELT_OUTPUT_MISMATCH')
       produced += output.count
     } finally {
       furnace.close()

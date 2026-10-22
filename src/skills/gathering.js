@@ -1,28 +1,14 @@
 import { goals } from 'mineflayer-pathfinder'
-import { countItems, survivalCheck, toolClassFor, hasToolClass } from '../world/inventory.js'
+import { countItems, survivalCheck, toolClassFor } from '../world/inventory.js'
 import { ensureTool } from './crafting.js'
 import { ensureFed } from '../safety/survival.js'
 import { collectNearbyDrops } from './pickup.js'
 import { immediateEnvironmentRisk } from '../safety/danger.js'
 
-const TOOL_RANK = ['netherite', 'diamond', 'iron', 'stone', 'golden', 'wooden']
-
 function resolveBlockIds(mcData, names) {
   return names
     .map(name => mcData.blocksByName[name]?.id)
     .filter(Number.isInteger)
-}
-
-async function equipBestTool(bot, toolClass) {
-  const items = bot.inventory.items()
-  for (const material of TOOL_RANK) {
-    const tool = items.find(item => item.name === `${material}_${toolClass}`)
-    if (tool) {
-      await bot.equip(tool, 'hand')
-      return tool
-    }
-  }
-  return null
 }
 
 function posKey(position) {
@@ -84,12 +70,10 @@ export async function gatherResource({
   }
 
   const toolClass = toolClassFor(resource)
-  if (!hasToolClass(bot, toolClass) && !['dirt'].includes(resource.canonical)) {
-    throw new Error(`MISSING_TOOL:${toolClass}`)
-  }
-
-  if (!['dirt'].includes(resource.canonical)) {
-    await equipBestTool(bot, toolClass)
+  // ensureTool validates mining tier, equips an adequate tool, or crafts one.
+  // Never select tools using material-name ordering alone.
+  if (resource.canonical !== 'dirt') {
+    await ensureTool({ bot, mcData, toolClass, resource })
   }
 
   const matching = resolveBlockIds(mcData, resource.blocks)

@@ -5,6 +5,8 @@ import { pathfinder, Movements, goals } from 'mineflayer-pathfinder'
 import vec3 from 'vec3'
 import { MemoryStore } from './memory.js'
 import { parseIntent, supportedResources } from './agent/intent.js'
+import { parseGatherPlan } from './agent/plan-parser.js'
+import { createPlan, currentPlanStep, recordPlanResult } from './agent/plan-state.js'
 import { inventorySummary, toolClassFor } from './world/inventory.js'
 import { gatherResource } from './skills/gathering.js'
 import { nearestChest, serializePosition, depositItems, countStoredItems } from './skills/storage.js'
@@ -60,6 +62,7 @@ await memory.load()
 let owner = MILO_OWNER || memory.get('owner.username') || ''
 let mcData = null
 let activeTask = null
+let planRunning = false
 const visionAnalyzer = MILO_VISION_ENDPOINT
   ? createHttpVisionAnalyzer({ endpoint: MILO_VISION_ENDPOINT, apiKey: MILO_VISION_API_KEY || null, model: MILO_VISION_MODEL || null })
   : null
@@ -349,6 +352,7 @@ async function runGatherTask(username, intent, options = {}) {
     } else {
       say(`done for now. I've got ${deliveryCount} on me. you haven't shown me home yet.`)
     }
+    return outcome
   } catch (error) {
     const reason = String(error?.message || error)
     const stillOwner = activeTask === task
@@ -387,6 +391,40 @@ async function runGatherTask(username, intent, options = {}) {
     }
   } finally {
     if (activeTask === task) activeTask = null
+  }
+}
+
+
+async function runGatherPlan(username, startingPlan) {
+  if (planRunning || activeTask) {
+    say("another task is still running.")
+    return
+  }
+  planRunning = true
+  let plan = startingPlan
+  try {
+    while (currentPlanStep(plan)) {
+      const step = currentPlanStep(plan)
+      memory.set('tasks.plan', plan)
+      await memory.save()
+      say('plan step ' + (plan.nextStep + 1) + '/' + plan.steps.length + ': ' + step.amount + ' ' + (step.resource.display || step.resource.canonical) + '.')
+      const outcome = await runGatherTask(username, step)
+      plan = recordPlanResult(plan, outcome)
+      memory.set('tasks.plan', plan)
+      await memory.save()
+      if (plan.status === 'paused') {
+        say("plan paused: this step did not verify. use Milo plan resume when ready.")
+        return
+      }
+    }
+    say("all plan steps verified; plan complete.")
+  } catch (error) {
+    plan = { ...plan, status: 'paused', failure: String(error?.message || error) }
+    memory.set('tasks.plan', plan)
+    await memory.save()
+    say("plan paused after error; no subsequent steps started.")
+  } finally {
+    planRunning = false
   }
 }
 
@@ -1194,6 +1232,62 @@ bot.on('chat', async (username, message) => {
       return
     }
 
+
+    if (normalized === 'plan discard') {
+      if (planRunning || activeTask) {
+        say("stop the active task before discarding the plan.")
+        return
+      }
+      memory.set('tasks.plan', null)
+      await memory.save()
+      say("saved plan discarded.")
+      return
+    }
+
+    if (normalized === 'plan status') {
+      const plan = memory.get('tasks.plan')
+      say(plan
+        ? 'plan ' + plan.status + ': ' + plan.nextStep + '/' + plan.steps.length + ' steps verified.'
+        : "there is no saved plan.")
+      return
+    }
+
+    if (normalized === 'plan resume') {
+      const plan = memory.get('tasks.plan')
+      if (!plan || plan.status === 'completed' || !currentPlanStep(plan)) {
+        say("there is no unfinished plan.")
+        return
+      }
+      if (planRunning || activeTask) {
+        say("I'm already working.")
+        return
+      }
+      void runGatherPlan(username, { ...plan, status: 'pending' })
+      return
+    }
+
+    if (normalized.startsWith('plan ')) {
+      if (planRunning || activeTask) {
+        say("I'm already working.")
+        return
+      }
+      const previous = memory.get('tasks.plan')
+      if (previous && previous.status !== 'completed' && previous.status !== 'cancelled') {
+        say("an unfinished plan exists; use Milo plan resume or Milo plan discard.")
+        return
+      }
+      const parsedPlan = parseGatherPlan(normalized)
+      if (!parsedPlan.ok) {
+        say("use 2-5 supported gather steps, for example Milo plan get 3 coal then get 2 iron.")
+        return
+      }
+      const plan = createPlan(parsedPlan.steps)
+      memory.set('tasks.plan', plan)
+      await memory.save()
+      void runGatherPlan(username, plan)
+      return
+    }
+
     if (/^(resume|resume task|continue task|continue)$/.test(normalized)) {
       if (activeTask) {
         say("I'm already working on something.")
@@ -1380,7 +1474,7 @@ bot.on('chat', async (username, message) => {
     }
 
     if (parsed.type === 'gather') {
-      if (activeTask) {
+      if (activeTask || planRunning) {
         say(`I'm already busy getting ${activeTask.amount} ${activeTask.resource}.`)
         return
       }
